@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
 import { useVoice } from '../hooks/useVoice';
@@ -17,12 +18,11 @@ export default function RoomPage() {
 
   const { start, stop, toggleMute, connected, muted } = useVoice();
 
-  const [songs,        setSongs]        = useState([]);
-  const [songSearch,   setSongSearch]   = useState('');
+  const [songs,          setSongs]          = useState([]);
+  const [songSearch,     setSongSearch]     = useState('');
   const [showSongPicker, setShowSongPicker] = useState(false);
-  const [tab,          setTab]          = useState('queue'); // 'queue' | 'score'
+  const [tab,            setTab]            = useState('queue');
 
-  // 방이 없으면 홈으로
   if (!roomId) {
     navigate('/');
     return null;
@@ -69,7 +69,6 @@ export default function RoomPage() {
 
   return (
     <div style={styles.container}>
-      {/* 헤더 */}
       <header style={styles.header}>
         <div>
           <span style={styles.logo}>🎤 FamilyLink</span>
@@ -77,32 +76,48 @@ export default function RoomPage() {
         </div>
         <div style={styles.headerRight}>
           <span style={styles.codeLabel}>코드: <b>{joinCode}</b></span>
-          <button style={styles.leaveBtn} onClick={handleLeave}>나가기</button>
+          <motion.button style={styles.leaveBtn} onClick={handleLeave} whileTap={{ scale: 0.95 }}>
+            나가기
+          </motion.button>
         </div>
       </header>
 
       <main style={styles.main}>
-
         {/* 현재 재생 중 */}
         <section style={styles.nowPlaying}>
-          {currentSong ? (
-            <>
-              {currentSong.thumbnail && (
-                <img src={currentSong.thumbnail} alt="" style={styles.nowThumb} />
-              )}
-              <div style={styles.nowInfo}>
-                <p style={styles.nowTitle}>{currentSong.title}</p>
-                <p style={styles.nowArtist}>{currentSong.artist}</p>
-              </div>
-            </>
-          ) : (
-            <p style={styles.noSong}>
-              {status === 'result' ? '🏆 노래 종료' : '노래를 신청하거나 기다려주세요'}
-            </p>
-          )}
+          <AnimatePresence mode="wait">
+            {currentSong ? (
+              <motion.div
+                key={currentSong.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.3 }}
+              >
+                {currentSong.thumbnail && (
+                  <img src={currentSong.thumbnail} alt="" style={styles.nowThumb} />
+                )}
+                <div style={styles.nowInfo}>
+                  <p style={styles.nowTitle}>{currentSong.title}</p>
+                  <p style={styles.nowArtist}>{currentSong.artist}</p>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.p
+                key="no-song"
+                style={styles.noSong}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                {status === 'result' ? '🏆 노래 종료' : '노래를 신청하거나 기다려주세요'}
+              </motion.p>
+            )}
+          </AnimatePresence>
         </section>
 
-        {/* 가사 싱크 표시 */}
+        {/* 가사 싱크 */}
         {currentSong && (
           <div style={styles.lyricsBar}>
             <div
@@ -116,115 +131,186 @@ export default function RoomPage() {
         )}
 
         {/* 점수 결과 */}
-        {status === 'result' && lastScore !== null && (
-          <div style={styles.scoreBox}>
-            🏆 점수: <strong>{lastScore}점</strong>
-          </div>
-        )}
+        <AnimatePresence>
+          {status === 'result' && lastScore !== null && (
+            <motion.div
+              style={styles.scoreBox}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            >
+              🏆 점수: <strong>{lastScore}점</strong>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* 리액션 */}
         <div style={styles.reactionRow}>
           {EMOJIS.map((emoji) => (
-            <button key={emoji} style={styles.emojiBtn} onClick={() => sendReaction(emoji)}>
+            <motion.button
+              key={emoji}
+              style={styles.emojiBtn}
+              onClick={() => sendReaction(emoji)}
+              whileTap={{ scale: 0.75 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+            >
               {emoji}
-            </button>
+            </motion.button>
           ))}
         </div>
 
-        {/* 최근 리액션 피드 */}
-        {reactions.length > 0 && (
-          <div style={styles.reactionFeed}>
+        {/* 리액션 피드 */}
+        <div style={styles.reactionFeed}>
+          <AnimatePresence>
             {[...reactions].reverse().slice(0, 5).map((r, i) => (
-              <span key={i} style={styles.reactionItem}>
+              <motion.span
+                key={`${r.nickname}-${i}`}
+                style={styles.reactionItem}
+                initial={{ opacity: 0, scale: 0.7 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.7 }}
+                transition={{ duration: 0.2 }}
+              >
                 {r.nickname}: {r.emoji}
-              </span>
+              </motion.span>
             ))}
-          </div>
-        )}
+          </AnimatePresence>
+        </div>
 
         {/* 탭 */}
         <div style={styles.tabRow}>
-          <button
+          <motion.button
             style={{ ...styles.tab, ...(tab === 'queue' ? styles.tabActive : {}) }}
             onClick={() => setTab('queue')}
+            whileTap={{ scale: 0.97 }}
           >
             대기열 ({queue.length})
-          </button>
-          <button
+          </motion.button>
+          <motion.button
             style={{ ...styles.tab, ...(tab === 'score' ? styles.tabActive : {}) }}
             onClick={() => setTab('score')}
+            whileTap={{ scale: 0.97 }}
           >
             점수판
-          </button>
+          </motion.button>
         </div>
 
         {/* 대기열 */}
         {tab === 'queue' && (
           <div>
-            <button style={styles.addSongBtn} onClick={openSongPicker}>
+            <motion.button
+              style={styles.addSongBtn}
+              onClick={openSongPicker}
+              whileTap={{ scale: 0.97 }}
+            >
               + 노래 신청
-            </button>
+            </motion.button>
             {queue.length === 0 && <p style={styles.empty}>대기열이 비어있습니다.</p>}
             {queue.map((item, idx) => (
-              <div key={item.id} style={styles.queueItem}>
+              <motion.div
+                key={item.id}
+                style={styles.queueItem}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: idx * 0.04 }}
+              >
                 <span style={styles.queuePos}>{idx + 1}</span>
                 <div style={styles.queueInfo}>
                   <span style={styles.queueTitle}>{item.title}</span>
                   <span style={styles.queueBy}>신청: {item.requested_by_nickname}</span>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         )}
 
-        {/* 점수판 (추후 확장용 플레이스홀더) */}
         {tab === 'score' && (
           <p style={styles.empty}>이번 세션 점수가 여기에 표시됩니다.</p>
         )}
 
-        {/* 음성 연결 버튼 */}
+        {/* 음성 연결 */}
         <div style={styles.voiceArea}>
-          <button
+          <motion.button
             style={{ ...styles.voiceBtn, background: connected ? '#e94560' : '#0f3460' }}
             onClick={handleVoice}
+            whileTap={{ scale: 0.96 }}
           >
             {connected ? (muted ? '🔇 음소거 해제' : '🎙️ 연결됨') : '🎙️ 음성 연결'}
-          </button>
-          {connected && (
-            <button style={styles.muteBtn} onClick={toggleMute}>
-              {muted ? '음소거 해제' : '음소거'}
-            </button>
-          )}
+          </motion.button>
+          <AnimatePresence>
+            {connected && (
+              <motion.button
+                style={styles.muteBtn}
+                onClick={toggleMute}
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {muted ? '음소거 해제' : '음소거'}
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </main>
 
       {/* 노래 선택 모달 */}
-      {showSongPicker && (
-        <div style={styles.overlay} onClick={() => setShowSongPicker(false)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>노래 신청</h3>
-            <input
-              style={styles.input}
-              placeholder="검색"
-              value={songSearch}
-              onChange={(e) => searchSongs(e.target.value)}
-              autoFocus
-            />
-            <div style={styles.modalList}>
-              {songs.map((song) => (
-                <div key={song.id} style={styles.modalItem} onClick={() => addToQueue(song.id)}>
-                  <div>
-                    <p style={styles.modalSongTitle}>{song.title}</p>
-                    <p style={styles.modalSongArtist}>{song.artist}</p>
-                  </div>
-                  <span style={styles.modalAdd}>+</span>
-                </div>
-              ))}
-            </div>
-            <button style={styles.closeBtn} onClick={() => setShowSongPicker(false)}>닫기</button>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {showSongPicker && (
+          <motion.div
+            style={styles.overlay}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowSongPicker(false)}
+          >
+            <motion.div
+              style={styles.modal}
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={styles.modalTitle}>노래 신청</h3>
+              <input
+                style={styles.input}
+                placeholder="검색"
+                value={songSearch}
+                onChange={(e) => searchSongs(e.target.value)}
+                autoFocus
+              />
+              <div style={styles.modalList}>
+                {songs.map((song, i) => (
+                  <motion.div
+                    key={song.id}
+                    style={styles.modalItem}
+                    onClick={() => addToQueue(song.id)}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15, delay: i * 0.03 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <div>
+                      <p style={styles.modalSongTitle}>{song.title}</p>
+                      <p style={styles.modalSongArtist}>{song.artist}</p>
+                    </div>
+                    <span style={styles.modalAdd}>+</span>
+                  </motion.div>
+                ))}
+              </div>
+              <motion.button
+                style={styles.closeBtn}
+                onClick={() => setShowSongPicker(false)}
+                whileTap={{ scale: 0.97 }}
+              >
+                닫기
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -283,6 +369,7 @@ const styles = {
   tab: {
     flex: 1, padding: '10px 0', background: 'transparent',
     border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14,
+    transition: 'background 0.2s, color 0.2s',
   },
   tabActive: { background: '#e94560', color: '#fff', fontWeight: 700 },
   addSongBtn: {
@@ -305,9 +392,8 @@ const styles = {
   },
   muteBtn: {
     padding: '13px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.2)',
-    background: 'transparent', color: '#fff', cursor: 'pointer',
+    background: 'transparent', color: '#fff', cursor: 'pointer', overflow: 'hidden',
   },
-  // 모달
   overlay: {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
     display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100,

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { getSocket } from '../hooks/useSocket';
@@ -41,9 +42,7 @@ export default function HomePage() {
 
     setLoading(true);
     try {
-      // 방 존재 확인
       await api.get(`/api/rooms/${joinCode.toUpperCase()}`);
-      // 소켓으로 입장
       const socket = getSocket();
       socket.emit('room:join', { joinCode: joinCode.toUpperCase() }, (ack) => {
         if (ack?.error) { setError(ack.error); setLoading(false); return; }
@@ -72,20 +71,27 @@ export default function HomePage() {
 
   return (
     <div style={styles.container}>
-      {/* 헤더 */}
       <header style={styles.header}>
         <span style={styles.logo}>🎤 FamilyLink</span>
         <div style={styles.headerRight}>
           <span style={styles.nickname}>{user?.nickname}</span>
-          <button style={styles.logoutBtn} onClick={() => { logout(); navigate('/auth'); }}>
+          <motion.button
+            style={styles.logoutBtn}
+            onClick={() => { logout(); navigate('/auth'); }}
+            whileTap={{ scale: 0.95 }}
+          >
             로그아웃
-          </button>
+          </motion.button>
         </div>
       </header>
 
       <main style={styles.main}>
-        {/* 방 참여 / 생성 */}
-        <section style={styles.section}>
+        <motion.section
+          style={styles.section}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+        >
           <h2 style={styles.sectionTitle}>방 입장</h2>
           <form onSubmit={handleJoin} style={styles.joinRow}>
             <input
@@ -95,18 +101,43 @@ export default function HomePage() {
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               maxLength={8}
             />
-            <button style={styles.joinBtn} type="submit" disabled={loading}>
+            <motion.button
+              style={styles.joinBtn}
+              type="submit"
+              disabled={loading}
+              whileTap={{ scale: 0.95 }}
+            >
               입장
-            </button>
+            </motion.button>
           </form>
-          {error && <p style={styles.error}>{error}</p>}
-          <button style={styles.createBtn} onClick={handleCreateRoom} disabled={loading}>
+          <AnimatePresence>
+            {error && (
+              <motion.p
+                style={styles.error}
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                {error}
+              </motion.p>
+            )}
+          </AnimatePresence>
+          <motion.button
+            style={styles.createBtn}
+            onClick={handleCreateRoom}
+            disabled={loading}
+            whileTap={{ scale: 0.97 }}
+          >
             + 새 방 만들기
-          </button>
-        </section>
+          </motion.button>
+        </motion.section>
 
-        {/* 노래 목록 */}
-        <section style={styles.section}>
+        <motion.section
+          style={styles.section}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut', delay: 0.1 }}
+        >
           <h2 style={styles.sectionTitle}>노래 목록</h2>
           <input
             style={{ ...styles.input, marginBottom: 12 }}
@@ -118,8 +149,15 @@ export default function HomePage() {
             {songs.length === 0 && (
               <p style={styles.empty}>등록된 노래가 없습니다.</p>
             )}
-            {songs.map((song) => (
-              <div key={song.id} style={styles.songItem}>
+            {songs.map((song, i) => (
+              <motion.div
+                key={song.id}
+                style={styles.songItem}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: i * 0.04 }}
+                whileTap={{ scale: 0.98 }}
+              >
                 {song.thumbnail && (
                   <img src={song.thumbnail} alt={song.title} style={styles.thumb} />
                 )}
@@ -128,10 +166,10 @@ export default function HomePage() {
                   <span style={styles.songArtist}>{song.artist}</span>
                 </div>
                 <span style={styles.duration}>{formatDuration(song.duration)}</span>
-              </div>
+              </motion.div>
             ))}
           </div>
-        </section>
+        </motion.section>
       </main>
     </div>
   );
