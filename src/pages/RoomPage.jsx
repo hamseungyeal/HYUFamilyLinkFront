@@ -61,7 +61,7 @@ export default function RoomPage() {
   }
 
   async function handleVoice() {
-    if (connected) { stop(); } else { await start(); }
+    if (connected) { stop(); } else { await start(roomId); }
   }
 
   const statusLabel = { waiting: '대기 중', singing: '노래 중', result: '결과' }[status];

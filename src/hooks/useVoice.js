@@ -1,97 +1,62 @@
 import { useRef, useState } from 'react';
-import { Device } from 'mediasoup-client';
-import { getSocket } from './useSocket';
+import AgoraRTC from 'agora-rtc-sdk-ng';
+import { api } from '../api/client';
 
-function emitWithAck(socket, event, data) {
-  return new Promise((resolve) => socket.emit(event, data, resolve));
-}
+const APP_ID = import.meta.env.VITE_AGORA_APP_ID;
 
 export function useVoice() {
-  const deviceRef        = useRef(null);
-  const sendTransportRef = useRef(null);
-  const recvTransportRef = useRef(null);
-  const producerRef      = useRef(null);
+  const clientRef       = useRef(null);
+  const localTrackRef   = useRef(null);
 
   const [connected, setConnected] = useState(false);
   const [muted,     setMuted]     = useState(false);
 
-  async function start() {
-    const socket = getSocket();
-    if (!socket) return;
+  async function start(roomId) {
+    // 1. BackServer에서 Agora 토큰 발급
+    const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
 
-    // 1. RTP capabilities
-    const { rtpCapabilities } = await emitWithAck(socket, 'ms:get_rtp_capabilities', {});
+    // 2. Agora 클라이언트 생성
+    const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+    clientRef.current = client;
 
-    // 2. mediasoup Device 초기화
-    const device = new Device();
-    await device.load({ routerRtpCapabilities: rtpCapabilities });
-    deviceRef.current = device;
-
-    // 3. send transport (마이크 → 서버)
-    const sendParams = await emitWithAck(socket, 'ms:create_transport', { direction: 'send' });
-    const sendTransport = device.createSendTransport(sendParams);
-    sendTransportRef.current = sendTransport;
-
-    sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
-      try {
-        await emitWithAck(socket, 'ms:connect_transport', { direction: 'send', dtlsParameters });
-        callback();
-      } catch (e) { errback(e); }
+    // 3. 다른 사용자 음성 자동 구독
+    client.on('user-published', async (remoteUser, mediaType) => {
+      await client.subscribe(remoteUser, mediaType);
+      if (mediaType === 'audio') {
+        remoteUser.audioTrack.play();
+      }
     });
 
-    sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
-      try {
-        const { producerId } = await emitWithAck(socket, 'ms:produce', { kind, rtpParameters });
-        callback({ id: producerId });
-      } catch (e) { errback(e); }
-    });
+    // 4. 채널 입장
+    await client.join(APP_ID, String(roomId), token, uid);
 
-    // 4. recv transport (서버 → 스피커)
-    const recvParams = await emitWithAck(socket, 'ms:create_transport', { direction: 'recv' });
-    const recvTransport = device.createRecvTransport(recvParams);
-    recvTransportRef.current = recvTransport;
-
-    recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
-      try {
-        await emitWithAck(socket, 'ms:connect_transport', { direction: 'recv', dtlsParameters });
-        callback();
-      } catch (e) { errback(e); }
-    });
-
-    // 5. 마이크 캡처 → produce
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const track  = stream.getAudioTracks()[0];
-    producerRef.current = await sendTransport.produce({ track });
-
-    // 6. 상대방 audio 구독
-    socket.on('ms:new_producer', async ({ producerId }) => {
-      const consumerParams = await emitWithAck(socket, 'ms:consume', {
-        producerId,
-        rtpCapabilities: device.rtpCapabilities,
-      });
-      const consumer = await recvTransport.consume(consumerParams);
-      const audio    = new Audio();
-      audio.srcObject = new MediaStream([consumer.track]);
-      audio.autoplay  = true;
-      audio.play().catch(() => {});
-    });
+    // 5. 마이크 트랙 생성 및 발행
+    const localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+    localTrackRef.current = localTrack;
+    await client.publish(localTrack);
 
     setConnected(true);
+    setMuted(false);
   }
 
   function toggleMute() {
-    const producer = producerRef.current;
-    if (!producer) return;
-    if (muted) { producer.resume(); } else { producer.pause(); }
+    const track = localTrackRef.current;
+    if (!track) return;
+    if (muted) {
+      track.setEnabled(true);
+    } else {
+      track.setEnabled(false);
+    }
     setMuted((m) => !m);
   }
 
-  function stop() {
-    producerRef.current?.close();
-    sendTransportRef.current?.close();
-    recvTransportRef.current?.close();
-    deviceRef.current = null;
+  async function stop() {
+    localTrackRef.current?.close();
+    localTrackRef.current = null;
+    await clientRef.current?.leave();
+    clientRef.current = null;
     setConnected(false);
+    setMuted(false);
   }
 
   return { start, stop, toggleMute, connected, muted };

@@ -11,7 +11,6 @@ React + Vite 기반 프론트엔드 서비스
 | React Router | 7 |
 | Zustand | 5 |
 | Socket.IO Client | 4 |
-| mediasoup-client | 3 |
 
 ## 프로젝트 구조
 
