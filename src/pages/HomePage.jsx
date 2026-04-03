@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
@@ -6,32 +6,52 @@ import { useRoomStore } from '../store/roomStore';
 import { getSocket } from '../hooks/useSocket';
 
 export default function HomePage() {
-  const [songs, setSongs] = useState([]);
   const [activeRooms, setActiveRooms] = useState([]); 
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showFriendManager, setShowFriendManager] = useState(false);
 
+  const navigate = useNavigate();
+  
+  // 전역 Store 데이터 구독
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const roomId = useRoomStore((s) => s.roomId);
-  const navigate = useNavigate();
+  const friends = useAuthStore((s) => s.friends); 
+  const friendStatuses = useAuthStore((s) => s.friendStatuses); 
+  const refreshFriends = useAuthStore((s) => s.refreshFriends); 
 
-  // [수정] 1. 스토어의 roomId가 변경되면 즉시 방으로 이동
+  const roomId = useRoomStore((s) => s.roomId);
+
+  // --- [디버깅 로그] 렌더링 시마다 데이터 상태 확인 ---
+  console.group('🏠 HomePage Render Check');
+  console.log('현재 로그인 유저:', user?.id, user?.nickname);
+  console.log('Store 친구 명단(Array):', friends);
+  console.log('Store 친구 상태(Object):', friendStatuses);
+  console.groupEnd();
+
+  // 1. 방 입장 감지
   useEffect(() => {
-    if (roomId) {
-      navigate('/room');
-    }
+    if (roomId) navigate('/room');
   }, [roomId, navigate]);
 
-  // [추가] 2. 서버에서 오는 방 상태(입장 성공) 리스너 등록
+  const fetchActiveRooms = useCallback(async () => {
+    try {
+      const res = await api.get('/api/rooms');
+      const data = res.data ? res.data : res;
+      setActiveRooms(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("방 목록 로딩 실패", err);
+    }
+  }, []);
+
+  // [수정] 2. 소켓 리스너 전용 (소켓이 없을 땐 이것만 일찍 종료됨)
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
-    // 서버가 방 입장을 승인하고 방 정보를 보낼 때 스토어를 업데이트합니다.
     const onRoomState = (data) => {
+      setLoading(false);
       if (data.roomId) {
         useRoomStore.setState({
           roomId: data.roomId,
@@ -42,53 +62,56 @@ export default function HomePage() {
       }
     };
 
+    const onFriendUpdate = () => {
+      console.log('🔔 실시간 친구 업데이트 수신');
+      refreshFriends();
+    };
+
+    const onRoomsUpdated = (data) => setActiveRooms(data || []);
+
+    const onSocketError = (msg) => {
+      setLoading(false);
+      setError(typeof msg === 'string' ? msg : '서버 오류가 발생했습니다.');
+    };
+
     socket.on('room:state', onRoomState);
+    socket.on('friend:update', onFriendUpdate);
+    socket.on('rooms:updated', onRoomsUpdated);
+    socket.on('error', onSocketError);
     
     return () => {
       socket.off('room:state', onRoomState);
+      socket.off('friend:update', onFriendUpdate);
+      socket.off('rooms:updated', onRoomsUpdated);
+      socket.off('error', onSocketError);
     };
-  }, []);
+  }, [refreshFriends]);
 
+  // [수정] 3. 데이터 로드 & 5초 갱신 전용 (소켓 유무와 관계없이 독립적으로 무조건 실행)
   useEffect(() => {
-    fetchSongs('');
+    console.log('🚀 초기 데이터 로드 시작');
     fetchActiveRooms();
+    refreshFriends().then(() => console.log('✅ refreshFriends 완료'));
+
     const timer = setInterval(fetchActiveRooms, 5000);
     return () => clearInterval(timer);
-  }, []);
-
-  async function fetchSongs(q) {
-    try {
-      const data = await api.get(`/api/songs${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-      setSongs(data);
-    } catch {}
-  }
-
-  async function fetchActiveRooms() {
-    try {
-      const data = await api.get('/api/rooms');
-      setActiveRooms(data);
-    } catch (err) {
-      console.error("방 목록 로딩 실패", err);
-    }
-  }
+  }, [fetchActiveRooms, refreshFriends]);
 
   const handleRandomMatch = () => {
     setError('');
     setLoading(true);
     getSocket()?.emit('room:match');
-    // 로딩이 너무 길어지면 수동으로 해제
-    setTimeout(() => setLoading(false), 5000);
+    setTimeout(() => setLoading(false), 5000); 
   };
 
   const handleJoinByCode = (code) => {
     if (!code) return;
     setError('');
     setLoading(true);
-    // [보강] 서버 응답(ack)을 처리하여 에러 발생 시 로딩 해제
     getSocket()?.emit('room:join', { joinCode: code.toUpperCase() }, (res) => {
-      if (res?.error) {
-        setError(res.error);
-        setLoading(false);
+      if (res?.error) { 
+        setError(res.error); 
+        setLoading(false); 
       }
     });
   };
@@ -97,6 +120,20 @@ export default function HomePage() {
     setError('');
     setLoading(true);
     getSocket()?.emit('room:create');
+  };
+
+  // --- 친구 관리 핸들러 (기존 기능 그대로 포함) ---
+  const handleFriendAccept = (targetId) => {
+    console.log('🤝 친구 요청 수락 시도:', targetId);
+    getSocket()?.emit('friend:accept', { targetId });
+  };
+
+  const handleFriendRemove = (targetId, isReject = false) => {
+    const confirmMsg = isReject ? "친구 요청을 거절하시겠습니까?" : "정말 이 친구를 삭제하시겠습니까?";
+    if (window.confirm(confirmMsg)) {
+      console.log('🗑️ 친구 삭제/거절 시도:', targetId);
+      getSocket()?.emit('friend:remove', { targetId });
+    }
   };
 
   return (
@@ -113,6 +150,7 @@ export default function HomePage() {
         <button onClick={() => setShowFriendManager(!showFriendManager)} style={styles.friendSingBtn}>
           👥 아는 친구와 노래하기
         </button>
+        {/* 버튼 스타일 변경 반영됨 */}
         <button onClick={() => setShowFriendManager(!showFriendManager)} style={styles.manageBtn}>
           {showFriendManager ? '✕ 관리창 닫기' : '⚙️ 친구 관리 및 찾기'}
         </button>
@@ -120,11 +158,56 @@ export default function HomePage() {
 
       {showFriendManager && (
         <div style={styles.friendPanel}>
-          <h3 style={{margin: '0 0 10px', color: '#e94560'}}>내 친구 목록</h3>
-          <p style={{color: '#aaa', fontSize: 18}}>현재 접속 중인 친구가 없습니다.</p>
+          <h3 style={styles.panelTitle}>내 친구 관리</h3>
+          <div style={styles.friendList}>
+            
+            {/* 1. 받은 요청 목록 (닉네임 표시 및 거절 버튼) */}
+            {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'received').map(([id, data]) => (
+              <div key={id} style={styles.friendItem}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{color: '#f9d423', fontWeight: 'bold'}}>🔔 새로운 친구 요청</span>
+                  <span style={{fontSize: 15, marginTop: 4}}>{data.nickname ? `${data.nickname}님` : `ID: ${id.slice(0, 5)}...`}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => handleFriendAccept(id)} style={styles.acceptBtn}>수락</button>
+                  <button onClick={() => handleFriendRemove(id, true)} style={styles.denyBtn}>거절</button>
+                </div>
+              </div>
+            ))}
+            
+            {/* 2. 친구 명단 및 요청 중 상태 표시 */}
+            {friends.length === 0 && 
+             !Object.values(friendStatuses).some(data => (data.status || data) === 'received' || (data.status || data) === 'sent') ? (
+              <p style={{color: '#aaa', fontSize: 18}}>현재 등록된 친구가 없습니다.</p>
+            ) : (
+              <>
+                {/* 확정된 친구 (삭제 버튼 포함) */}
+                {friends.map(friend => (
+                  <div key={friend.id} style={styles.friendItem}>
+                    <div>
+                      <span style={{fontSize: 18, fontWeight: 'bold'}}>{friend.nickname}</span>
+                      <span style={{color: '#aaa', fontSize: 14, marginLeft: '8px'}}>✓ 내 친구</span>
+                    </div>
+                    <button onClick={() => handleFriendRemove(friend.id, false)} style={styles.deleteBtn}>삭제</button>
+                  </div>
+                ))}
+
+                {/* 3. 보낸 요청 표시 */}
+                {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'sent').map(([id, data]) => (
+                  <div key={id} style={{...styles.friendItem, opacity: 0.6}}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{color: '#aaa'}}>요청 대기 중...</span>
+                      <span style={{fontSize: 13, marginTop: 4}}>{data.nickname ? `${data.nickname}님에게` : `ID: ${id.slice(0, 5)}`}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
         </div>
       )}
 
+      {/* 방 목록 섹션 */}
       <div style={styles.roomSection}>
         <h2 style={styles.sectionTitle}>지금 열려있는 노래방</h2>
         <div style={styles.scrollContainer}>
@@ -135,10 +218,10 @@ export default function HomePage() {
               <div key={room.id} style={styles.roomCard} onClick={() => handleJoinByCode(room.joinCode)}>
                 <div style={styles.roomCardLeft}>
                   <div style={styles.hostName}>{room.hostName}님의 방</div>
-                  <div style={styles.songInfo}>🎶 {room.currentSong}</div>
+                  <div style={styles.songInfo}>🎶 {room.currentSong || '대기 중'}</div>
                 </div>
                 <div style={styles.roomCardRight}>
-                  <div style={styles.countBadge}>{room.participantCount}명 대기 중</div>
+                  <div style={styles.countBadge}>{room.participantCount}명 참여 중</div>
                   <div style={styles.enterTag}>입장하기 ▶</div>
                 </div>
               </div>
@@ -159,39 +242,39 @@ export default function HomePage() {
           <button onClick={() => handleJoinByCode(joinCode)} style={styles.joinBtn} disabled={loading}>입장</button>
         </div>
         {error && <p style={styles.error}>{error}</p>}
-        <button onClick={handleCreateRoom} style={styles.createBtn} disabled={loading}>
-          🏠 새 노래방 직접 만들기
-        </button>
+        <button onClick={handleCreateRoom} style={styles.createBtn} disabled={loading}>🏠 새 노래방 만들기</button>
       </div>
     </div>
   );
 }
 
-// ... styles 객체는 기존과 동일
 const styles = {
   container: { maxWidth: 600, margin: '0 auto', padding: '24px 16px', color: '#fff', background: '#1a1a2e', minHeight: '100vh' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
   userInfo: { fontSize: 24, fontWeight: 'bold' },
-  logoutBtn: { background: 'transparent', border: '1px solid #aaa', color: '#aaa', padding: '8px 12px', borderRadius: 8 },
+  logoutBtn: { background: 'transparent', border: '1px solid #aaa', color: '#aaa', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' },
   mainButtons: { display: 'flex', flexDirection: 'column', gap: 15, marginBottom: 40 },
-  randomBtn: { 
-    padding: '30px', borderRadius: 24, border: 'none', 
-    background: 'linear-gradient(45deg, #e94560, #ff4b2b)', color: '#fff', 
-    fontSize: 28, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 8px 20px rgba(233, 69, 96, 0.4)' 
-  },
-  friendSingBtn: { 
-    padding: '20px', borderRadius: 20, border: '2px solid #e94560', 
-    background: 'transparent', color: '#e94560', fontSize: 22, fontWeight: 'bold', cursor: 'pointer'
-  },
-  manageBtn: { background: 'transparent', border: 'none', color: '#aaa', fontSize: 18, textDecoration: 'underline', cursor: 'pointer' },
-  friendPanel: { padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: 24, marginBottom: 25, textAlign: 'center' },
+  
+  // 메인 버튼 스타일들
+  randomBtn: { padding: '30px', borderRadius: 24, border: 'none', background: 'linear-gradient(45deg, #e94560, #ff4b2b)', color: '#fff', fontSize: 28, fontWeight: 'bold', cursor: 'pointer' },
+  friendSingBtn: { padding: '20px', borderRadius: 20, border: '2px solid #e94560', background: 'transparent', color: '#e94560', fontSize: 22, fontWeight: 'bold', cursor: 'pointer' },
+  
+  // [수정된 부분] 친구 관리 버튼을 위의 friendSingBtn과 동일한 규격의 대형 버튼으로 변경
+  manageBtn: { padding: '20px', borderRadius: 20, border: '2px solid #aaa', background: 'transparent', color: '#aaa', fontSize: 22, fontWeight: 'bold', cursor: 'pointer' },
+  
+  friendPanel: { padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: 24, marginBottom: 25 },
+  panelTitle: { margin: '0 0 10px', color: '#e94560', borderBottom: '1px solid #333', paddingBottom: 10 },
+  friendList: { display: 'flex', flexDirection: 'column', gap: 12 },
+  friendItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: 15 },
+  
+  acceptBtn: { padding: '8px 15px', background: '#f9d423', color: '#1a1a2e', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer' },
+  denyBtn: { padding: '8px 15px', background: '#444', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer' },
+  deleteBtn: { padding: '6px 12px', background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' },
+  
   roomSection: { marginBottom: 40 },
   sectionTitle: { margin: '0 0 16px', fontSize: 22, fontWeight: 800, color: '#e94560' },
   scrollContainer: { display: 'flex', flexDirection: 'column', gap: 15, maxHeight: '400px', overflowY: 'auto' },
-  roomCard: { 
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
-    padding: '25px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' 
-  },
+  roomCard: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '25px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' },
   roomCardLeft: { display: 'flex', flexDirection: 'column', gap: 8 },
   hostName: { fontSize: 22, fontWeight: 'bold' },
   songInfo: { fontSize: 18, color: '#ffb3bd' },

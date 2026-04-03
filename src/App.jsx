@@ -1,3 +1,4 @@
+import { useEffect } from 'react'; // useEffect 추가
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import { useSocket } from './hooks/useSocket';
@@ -11,7 +12,19 @@ function PrivateRoute({ children }) {
 }
 
 function AppRoutes() {
+  // authStore에서 user와 refreshFriends 함수를 가져옵니다.
+  const user = useAuthStore((s) => s.user);
+  const refreshFriends = useAuthStore((s) => s.refreshFriends);
+  
   useSocket(); // 로그인 상태이면 소켓 자동 연결
+
+  // [핵심 추가] 앱 실행 시 또는 로그인 직후 친구 목록을 미리 로드
+  useEffect(() => {
+    if (user) {
+      refreshFriends();
+    }
+  }, [user, refreshFriends]);
+
   return (
     <Routes>
       <Route path="/auth" element={<AuthPage />} />

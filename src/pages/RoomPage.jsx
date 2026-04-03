@@ -12,19 +12,21 @@ export default function RoomPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   
+  const friendStatuses = useAuthStore((s) => s.friendStatuses);
+  const refreshFriends = useAuthStore((s) => s.refreshFriends);
+
   const { roomId, joinCode, participants, currentSong } = useRoomStore();
   const { start, stop, toggleMute, muted } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [songSearch, setSongSearch] = useState('');
   const [songs, setSongs] = useState([]);
-  const [friendStatuses, setFriendStatuses] = useState({});
-  const [activeReactions, setActiveReactions] = useState([]);
   
-  // 퇴장 프로세스 플래그
+  const [activeReactions, setActiveReactions] = useState([]);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
 
-  // 1. 소켓 리스너 및 초기화
+  // 1. 방 관리 및 실시간 리스너
   useEffect(() => {
     const socket = getSocket();
     if (!socket || isLeaving.current) return;
@@ -33,7 +35,7 @@ export default function RoomPage() {
       const savedCode = sessionStorage.getItem('lastJoinCode');
       if (savedCode) {
         socket.emit('room:join', { joinCode: savedCode });
-        return;
+        return; 
       } else {
         navigate('/', { replace: true });
         return;
@@ -42,21 +44,21 @@ export default function RoomPage() {
 
     sessionStorage.setItem('lastJoinCode', joinCode);
 
-    const initRoom = async () => {
+    const initData = async () => {
       try {
         await start(roomId);
-        const { data } = await api.get('/api/friends/statuses');
-        setFriendStatuses(data);
+        await refreshFriends(); 
+        setIsInitialLoading(false);
       } catch (err) {
-        console.error("초기화 오류:", err);
+        setIsInitialLoading(false);
       }
     };
-    initRoom();
+    initData();
 
-    const onRoomState = (data) => {
-      // [방어] 나가는 중일 때는 서버에서 오는 그 어떠한 상태 업데이트도 거부합니다.
-      if (isLeaving.current) return; 
-
+    const onRoomState = async (data) => {
+      if (isLeaving.current) return;
+      await refreshFriends();
+      
       useRoomStore.setState((state) => ({
         ...state,
         participants: data.participants || state.participants,
@@ -64,22 +66,29 @@ export default function RoomPage() {
       }));
     };
 
-    const onFriendUpdate = ({ fromId, status }) => {
+    // [수정] 소켓 업데이트 시 객체 구조({status, nickname})를 유지하도록 보강
+    const onFriendUpdate = (payload) => {
       if (isLeaving.current) return;
-      setFriendStatuses(prev => ({ ...prev, [fromId]: status }));
+      if (!payload || !payload.fromId) {
+        refreshFriends(); // 페이로드가 없으면 전체 새로고침
+        return;
+      }
+      useAuthStore.setState((prev) => {
+        const existingData = prev.friendStatuses[payload.fromId] || {};
+        return {
+          friendStatuses: { 
+            ...prev.friendStatuses, 
+            [payload.fromId]: { ...existingData, status: payload.status } 
+          }
+        };
+      });
     };
 
     const onReaction = (data) => {
       if (isLeaving.current) return;
       const rid = Date.now() + Math.random();
-      setActiveReactions(prev => [...prev, {
-        ...data,
-        id: rid,
-        left: Math.floor(Math.random() * 60) + 20,
-      }]);
-      setTimeout(() => {
-        setActiveReactions(prev => prev.filter(r => r.id !== rid));
-      }, 4000);
+      setActiveReactions(prev => [...prev, { ...data, id: rid, left: Math.floor(Math.random() * 60) + 20 }]);
+      setTimeout(() => setActiveReactions(prev => prev.filter(r => r.id !== rid)), 4000);
     };
 
     socket.on('room:state', onRoomState);
@@ -91,88 +100,57 @@ export default function RoomPage() {
       socket.off('friend:update', onFriendUpdate); 
       socket.off('user:reaction', onReaction);
     };
-  }, [roomId, joinCode, navigate, start]);
+  }, [roomId, joinCode, navigate, start, refreshFriends]);
 
-  // 2. [핵심] 퇴장 로직 - 리스너 오프 및 상태 즉시 파괴
   const handleLeave = async () => {
     if (isLeaving.current) return;
     isLeaving.current = true; 
-
     const socket = getSocket();
-    
-    // [중요] 서버 메시지가 내 스토어를 다시 채우지 못하도록 리스너를 즉시 끕니다.
     socket?.off('room:state');
     socket?.off('friend:update');
-    socket?.off('user:reaction');
-
-    // 1. 복구 정보와 스토어 상태를 "동기적"으로 즉시 지웁니다.
     sessionStorage.removeItem('lastJoinCode');
-    useRoomStore.setState({ 
-      roomId: null, 
-      joinCode: null, 
-      participants: [], 
-      currentSong: null 
-    });
-    
-    // 2. 즉시 페이지 이동 (HomePage가 깨끗한 스토어를 보게 됨)
+    useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null });
     navigate('/', { replace: true });
-
-    // 3. 비동기 통신 (이동 후에 처리해도 무관함)
-    try {
-      socket?.emit('room:leave');
-      await stop(); 
-    } catch (err) {
-      console.error("퇴장 통신 오류:", err);
-    }
+    try { socket?.emit('room:leave'); await stop(); } catch (err) {}
   };
 
   const handleFriendAction = (targetId) => {
     const socket = getSocket();
-    const current = friendStatuses[targetId];
+    // [수정] 현재 상태를 안전하게 추출
+    const statusData = friendStatuses[targetId];
+    const current = statusData?.status || statusData; // 객체면 .status, 아니면 문자열 자체
     const event = current === 'received' ? 'friend:accept' : 'friend:request';
     
-    socket?.emit(event, { targetId });
-
-    setFriendStatuses(prev => ({
-      ...prev,
-      [targetId]: current === 'received' ? 'friend' : 'sent'
+    // [수정] 낙관적 업데이트를 객체 구조에 맞게 갱신
+    useAuthStore.setState((prev) => ({
+      friendStatuses: {
+        ...prev.friendStatuses,
+        [targetId]: { ...(prev.friendStatuses[targetId] || {}), status: current === 'received' ? 'friend' : 'sent' }
+      }
     }));
+
+    socket?.emit(event, { targetId });
   };
 
-  const sendEmoji = (emoji) => {
-    getSocket()?.emit('user:reaction', { emoji });
-  };
-
+  const sendEmoji = (emoji) => { getSocket()?.emit('user:reaction', { emoji }); };
   const searchSongs = async (q) => {
     setSongSearch(q);
     if (!q) return;
-    try {
-      const { data } = await api.get(`/api/songs?q=${encodeURIComponent(q)}`);
-      setSongs(data);
+    try { 
+      const { data } = await api.get(`/api/songs?q=${encodeURIComponent(q)}`); 
+      setSongs(data || []); 
     } catch {}
   };
-
-  const reserveSong = (songId) => {
-    getSocket()?.emit('queue:add', { songId });
-    setShowSongPicker(false);
-    setSongSearch('');
-  };
+  const reserveSong = (songId) => { getSocket()?.emit('queue:add', { songId }); setShowSongPicker(false); setSongSearch(''); };
 
   if (!roomId && !sessionStorage.getItem('lastJoinCode') && !isLeaving.current) return null;
 
   return (
     <div style={styles.container}>
       <style>{`
-        @keyframes bubbleUp {
-          0% { transform: translateY(0) scale(0.5); opacity: 0; }
-          20% { opacity: 1; transform: translateY(-50px) scale(1.2); }
-          100% { transform: translateY(-350px) scale(1); opacity: 0; }
-        }
-        @keyframes pulseGlow {
-          0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; }
-          50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; }
-          100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; }
-        }
+        @keyframes bubbleUp { 0% { transform: translateY(0) scale(0.5); opacity: 0; } 20% { opacity: 1; transform: translateY(-50px) scale(1.2); } 100% { transform: translateY(-350px) scale(1); opacity: 0; } }
+        @keyframes pulseGlow { 0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } 50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; } 100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } }
+        @keyframes heartbeat { 0% { transform: scale(1); } 15% { transform: scale(1.1); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } 60% { transform: scale(1); } }
       `}</style>
 
       <div style={styles.reactionLayer}>
@@ -187,17 +165,12 @@ export default function RoomPage() {
       <header style={styles.header}>
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>방 코드: {joinCode || '...'}</span>
-        <button onClick={() => toggleMute()} style={{...styles.muteBtn, background: muted ? '#ff4b2b' : 'transparent'}}>
-          {muted ? '🔇 마이크 꺼짐' : '🎤 마이크 켜짐'}
-        </button>
+        <button onClick={() => toggleMute()} style={{...styles.muteBtn, background: muted ? '#ff4b2b' : 'transparent'}}>{muted ? '🔇 마이크 꺼짐' : '🎤 마이크 켜짐'}</button>
       </header>
 
       <div style={styles.mainDisplay}>
         {currentSong ? (
-          <div style={styles.songCard}>
-            <h2 style={styles.songTitle}>{currentSong.title}</h2>
-            <p style={styles.songArtist}>{currentSong.artist}</p>
-          </div>
+          <div style={styles.songCard}><h2 style={styles.songTitle}>{currentSong.title}</h2><p style={styles.songArtist}>{currentSong.artist}</p></div>
         ) : (
           <div style={styles.emptyCard}>화면을 눌러 노래를 예약하세요</div>
         )}
@@ -208,9 +181,19 @@ export default function RoomPage() {
         <div style={styles.userList}>
           {participants.map((p) => {
             const isMe = p.id === user?.id;
-            const status = friendStatuses[p.id]; 
-            const isReceived = status === 'received';
-            const isFriend = status === 'friend';
+            
+            // [수정] 객체 구조에서 상태 문자열만 안전하게 추출
+            const statusData = friendStatuses[p.id]; 
+            const currentStatus = statusData?.status || statusData; // 하위 호환성 보장
+            
+            const isReceived = currentStatus === 'received';
+            const isFriend = currentStatus === 'friend';
+            const isSent = currentStatus === 'sent';
+
+            let buttonText = '➕ 친구 추가';
+            if (isFriend) buttonText = '✓ 친구';
+            else if (isSent) buttonText = '요청됨';
+            else if (isReceived) buttonText = '수락하기';
 
             return (
               <div key={p.id} style={styles.userItem}>
@@ -221,17 +204,15 @@ export default function RoomPage() {
                 {!isMe && (
                   <button
                     onClick={() => handleFriendAction(p.id)}
-                    disabled={isFriend || status === 'sent'}
+                    disabled={isInitialLoading || isFriend || isSent}
                     style={{
                       ...styles.friendBtn,
-                      ...(isReceived ? styles.receivedEffect : {}),
+                      ...(isReceived ? styles.receivedThumpEffect : {}),
                       ...(isFriend ? styles.alreadyFriend : {}),
-                      opacity: status === 'sent' ? 0.7 : 1
+                      opacity: (isSent || isInitialLoading) ? 0.7 : 1
                     }}
                   >
-                    {isFriend ? '✓ 친구' : 
-                     status === 'sent' ? '요청됨' : 
-                     isReceived ? '🤝 친구 수락!' : '➕ 친구 추가'}
+                    {isInitialLoading ? '...' : buttonText}
                   </button>
                 )}
               </div>
@@ -241,35 +222,16 @@ export default function RoomPage() {
       </div>
 
       <footer style={styles.footer}>
-        <div style={styles.emojiRow}>
-          {EMOJIS.map(e => (
-            <button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>
-          ))}
-        </div>
+        <div style={styles.emojiRow}>{EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}</div>
         <button onClick={() => setShowSongPicker(true)} style={styles.addSongBtn}>🎶 노래 예약하기</button>
       </footer>
 
       {showSongPicker && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
-            <header style={styles.modalHeader}>
-              <h3>노래 찾기</h3>
-              <button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button>
-            </header>
-            <input 
-              style={styles.searchInput} 
-              value={songSearch} 
-              onChange={(e) => searchSongs(e.target.value)} 
-              placeholder="제목이나 가수를 입력하세요" 
-            />
-            <div style={styles.songList}>
-              {songs.map(s => (
-                <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s.id)}>
-                  <div>{s.title}</div>
-                  <div style={{fontSize: 14, color: '#aaa'}}>{s.artist}</div>
-                </div>
-              ))}
-            </div>
+            <header style={styles.modalHeader}><h3>노래 찾기</h3><button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button></header>
+            <input style={styles.searchInput} value={songSearch} onChange={(e) => searchSongs(e.target.value)} placeholder="제목이나 가수를 입력하세요" />
+            <div style={styles.songList}>{songs.map(s => (<div key={s.id} style={styles.songItem} onClick={() => reserveSong(s.id)}><div>{s.title}</div><div style={{fontSize: 14, color: '#aaa'}}>{s.artist}</div></div>))}</div>
           </div>
         </div>
       )}
@@ -299,8 +261,8 @@ const styles = {
   userInfo: { display: 'flex', alignItems: 'center', gap: 12 },
   avatar: { width: 45, height: 45, borderRadius: '50%', background: '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 'bold' },
   userName: { fontSize: 18 },
-  friendBtn: { padding: '10px 15px', borderRadius: 8, border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer' },
-  receivedEffect: { background: '#f9d423', color: '#1a1a2e', animation: 'pulseGlow 1.5s infinite' },
+  friendBtn: { padding: '10px 15px', borderRadius: 8, border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease' },
+  receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
   alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
   footer: { display: 'flex', flexDirection: 'column', gap: 15, zIndex: 10 },
   emojiRow: { display: 'flex', justifyContent: 'space-between' },
