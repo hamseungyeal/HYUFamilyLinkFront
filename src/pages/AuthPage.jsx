@@ -1,119 +1,149 @@
-import { useState } from 'react';
+
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 
 export default function AuthPage() {
-  const [mode, setMode]         = useState('login');
-  const [nickname, setNickname] = useState('');
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [name, setName] = useState('');
+  const [birthdate, setBirthdate] = useState(''); // 4자리 숫자 PIN
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-  const setAuth    = useAuthStore((s) => s.setAuth);
-  const navigate   = useNavigate();
+  const setAuth = useAuthStore((s) => s.setAuth);
+  const navigate = useNavigate();
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      let data;
-      if (mode === 'login') {
-        data = await api.post('/api/auth/login', { email, password });
-      } else {
-        data = await api.post('/api/auth/register', { nickname, email, password, role: 'phone' });
-      }
-      setAuth(data.user, data.token);
-      navigate('/');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  // 음성 인식 설정 (Web Speech API)
+  const handleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+      return;
     }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setName(transcript.replace(/\s/g, '')); // 공백 제거 후 성함 설정
+    };
+    recognition.start();
+  };
+
+  const handleNumberClick = (num) => {
+    if (birthdate.length < 4) {
+      setBirthdate((prev) => prev + num);
+    }
+  };
+
+  const handleBackspace = () => {
+    setBirthdate((prev) => prev.slice(0, -1));
+  };
+
+  // AuthPage.jsx의 handleSubmit 함수 내부 수정
+async function handleSubmit(e) {
+  if (e) e.preventDefault();
+  if (birthdate.length !== 4) {
+    setError('생년월일 4자리를 모두 눌러주세요.');
+    return;
   }
+
+  setError('');
+  setLoading(true);
+  try {
+    const payload = { 
+      name, 
+      password: birthdate, 
+      role: 'phone' 
+    };
+
+    let data;
+    // 로그인과 회원가입 모두 동일한 payload 형식을 사용합니다.
+    if (mode === 'login') {
+      data = await api.post('/api/auth/login', payload);
+    } else {
+      data = await api.post('/api/auth/register', payload);
+    }
+
+    setAuth(data.user, data.token);
+    navigate('/');
+  } catch (err) {
+    console.error(err);
+    setError(err.response?.data?.error || '접속에 실패했습니다.');
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <div style={styles.container}>
-      <motion.div
-        style={styles.card}
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-      >
-        <h1 style={styles.title}>🎤 FamilyLink</h1>
-        <p style={styles.subtitle}>VR 노래방</p>
+      <div style={styles.card}>
+        <h1 style={styles.title}>🎤 FamilyLink 노래방</h1>
+        <p style={styles.subtitle}>반가워요! 본인의 정보를 알려주세요.</p>
 
         <div style={styles.tabRow}>
-          <motion.button
-            style={{ ...styles.tab, ...(mode === 'login' ? styles.tabActive : {}) }}
-            onClick={() => { setMode('login'); setError(''); }}
-            whileTap={{ scale: 0.96 }}
-          >로그인</motion.button>
-          <motion.button
-            style={{ ...styles.tab, ...(mode === 'register' ? styles.tabActive : {}) }}
-            onClick={() => { setMode('register'); setError(''); }}
-            whileTap={{ scale: 0.96 }}
-          >회원가입</motion.button>
+          <button 
+            onClick={() => { setMode('login'); setError(''); }} 
+            style={{ ...styles.tab, color: mode === 'login' ? '#fff' : '#aaa', background: mode === 'login' ? '#e94560' : 'transparent' }}
+          >로그인</button>
+          <button 
+            onClick={() => { setMode('register'); setError(''); }} 
+            style={{ ...styles.tab, color: mode === 'register' ? '#fff' : '#aaa', background: mode === 'register' ? '#e94560' : 'transparent' }}
+          >처음이에요</button>
         </div>
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <AnimatePresence>
-            {mode === 'register' && (
-              <motion.input
-                style={styles.input}
-                placeholder="닉네임"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                required
-                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                animate={{ opacity: 1, height: 'auto', marginBottom: 0 }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-              />
-            )}
-          </AnimatePresence>
-          <input
-            style={styles.input}
-            type="email"
-            placeholder="이메일"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            style={styles.input}
-            type="password"
-            placeholder="비밀번호"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <AnimatePresence>
-            {error && (
-              <motion.p
-                style={styles.error}
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
+        <div style={styles.inputSection}>
+          <label style={styles.label}>1. 성함</label>
+          <div style={styles.voiceRow}>
+            <input
+              style={styles.largeInput}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="이름을 입력하세요"
+            />
+            <button onClick={handleVoiceInput} style={{...styles.voiceBtn, background: isListening ? '#ff4b2b' : '#30475e'}}>
+              {isListening ? '듣고 있어요' : '🎤 말하기'}
+            </button>
+          </div>
+        </div>
+
+        <div style={styles.inputSection}>
+          <label style={styles.label}>2. 생년월일 (4자리)</label>
+          <div style={styles.pinDisplay}>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} style={styles.pinDot}>
+                {birthdate[i] ? '●' : '○'}
+              </div>
+            ))}
+          </div>
+          
+          <div style={styles.keypad}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, '지우기', 0, '확인'].map((item) => (
+              <button
+                key={item}
+                onClick={() => {
+                  if (item === '지우기') handleBackspace();
+                  else if (item === '확인') handleSubmit();
+                  else handleNumberClick(item);
+                }}
+                style={{
+                  ...styles.keyBtn,
+                  background: item === '확인' ? '#e94560' : (item === '지우기' ? '#53354a' : 'rgba(255,255,255,0.1)')
+                }}
               >
-                {error}
-              </motion.p>
-            )}
-          </AnimatePresence>
-          <motion.button
-            style={styles.btn}
-            type="submit"
-            disabled={loading}
-            whileTap={{ scale: 0.97 }}
-            whileHover={{ brightness: 1.1 }}
-          >
-            {loading ? '처리 중...' : mode === 'login' ? '로그인' : '가입하기'}
-          </motion.button>
-        </form>
-      </motion.div>
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && <p style={styles.error}>{error}</p>}
+        {loading && <p style={styles.loading}>접속 중...</p>}
+      </div>
     </div>
   );
 }
@@ -124,37 +154,38 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+    background: '#1a1a2e',
+    padding: '20px',
   },
   card: {
     background: 'rgba(255,255,255,0.05)',
     backdropFilter: 'blur(10px)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 20,
-    padding: '40px 32px',
+    borderRadius: 30,
+    padding: '30px',
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 500,
     color: '#fff',
+    border: '1px solid rgba(255,255,255,0.1)',
   },
-  title:    { margin: 0, fontSize: 32, textAlign: 'center' },
-  subtitle: { margin: '4px 0 24px', textAlign: 'center', color: '#aaa', fontSize: 14 },
-  tabRow:   { display: 'flex', marginBottom: 24, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' },
-  tab: {
-    flex: 1, padding: '10px 0', background: 'transparent',
-    border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14,
-    transition: 'background 0.2s, color 0.2s',
+  title: { margin: '0 0 10px', fontSize: 36, textAlign: 'center', fontWeight: 'bold' },
+  subtitle: { margin: '0 0 30px', textAlign: 'center', color: '#ccc', fontSize: 20 },
+  tabRow: { display: 'flex', marginBottom: 30, borderRadius: 15, overflow: 'hidden', border: '2px solid #e94560' },
+  tab: { flex: 1, padding: '15px 0', border: 'none', cursor: 'pointer', fontSize: 22, fontWeight: 'bold', transition: '0.3s' },
+  inputSection: { marginBottom: 30 },
+  label: { display: 'block', marginBottom: 12, fontSize: 24, fontWeight: '600', color: '#e94560' },
+  voiceRow: { display: 'flex', gap: 10 },
+  largeInput: {
+    flex: 1, padding: '15px', borderRadius: 12, border: 'none',
+    background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 24, outline: 'none',
   },
-  tabActive: { background: '#e94560', color: '#fff', fontWeight: 700 },
-  form:     { display: 'flex', flexDirection: 'column', gap: 12 },
-  input: {
-    padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)',
-    background: 'rgba(255,255,255,0.07)', color: '#fff', fontSize: 15, outline: 'none',
-    transition: 'border-color 0.2s',
+  voiceBtn: { padding: '0 20px', borderRadius: 12, border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer', fontWeight: 'bold' },
+  pinDisplay: { display: 'flex', justifyContent: 'center', gap: 20, marginBottom: 20, fontSize: 30, color: '#e94560' },
+  pinDot: { width: 40, textAlign: 'center' },
+  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
+  keyBtn: {
+    padding: '20px', borderRadius: 15, border: 'none', color: '#fff', 
+    fontSize: 26, fontWeight: 'bold', cursor: 'pointer', transition: '0.2s active',
   },
-  btn: {
-    marginTop: 8, padding: '13px 0', borderRadius: 10, border: 'none',
-    background: '#e94560', color: '#fff', fontSize: 16, fontWeight: 700,
-    cursor: 'pointer',
-  },
-  error: { color: '#ff6b6b', fontSize: 13, margin: 0 },
+  error: { color: '#ff6b6b', fontSize: 18, textAlign: 'center', marginTop: 20, fontWeight: 'bold' },
+  loading: { textAlign: 'center', marginTop: 20, fontSize: 20, color: '#aaa' }
 };

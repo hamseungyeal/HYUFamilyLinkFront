@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
 import { useVoice } from '../hooks/useVoice';
@@ -11,413 +10,202 @@ const EMOJIS = ['🎤', '👏', '🔥', '❤️', '😂', '🎵'];
 
 export default function RoomPage() {
   const navigate = useNavigate();
-  const user     = useAuthStore((s) => s.user);
+  const user = useAuthStore((s) => s.user);
+  
+  // Zustand 스토어 데이터
+  const { roomId, joinCode, participants, currentSong } = useRoomStore();
+  
+  // 음성 관련 훅
+  const { start, stop, toggleMute, muted } = useVoice();
+  
+  const [friendStatuses, setFriendStatuses] = useState({});
 
-  const { roomId, joinCode, status, queue, currentSong, currentMs, reactions, lastScore } =
-    useRoomStore();
+  // 1. 초기 입장 및 데이터 로드
+  useEffect(() => {
+    // roomId가 없으면 메인으로 튕김
+    if (!roomId) {
+      navigate('/', { replace: true });
+      return;
+    }
 
-  const { start, stop, toggleMute, connected, muted } = useVoice();
+    const initRoom = async () => {
+      try {
+        await start(roomId); // 음성 엔진 시작
+        const { data } = await api.get('/api/friends/statuses'); // 친구 상태 로드
+        setFriendStatuses(data);
+      } catch (err) {
+        console.error("방 초기화 중 오류:", err);
+      }
+    };
+    initRoom();
 
-  const [songs,          setSongs]          = useState([]);
-  const [songSearch,     setSongSearch]     = useState('');
-  const [showSongPicker, setShowSongPicker] = useState(false);
-  const [tab,            setTab]            = useState('queue');
-
-  if (!roomId) {
-    navigate('/');
-    return null;
-  }
-
-  async function handleLeave() {
     const socket = getSocket();
-    socket?.emit('room:leave');
-    stop();
-    navigate('/');
-  }
-
-  async function openSongPicker() {
-    const data = await api.get('/api/songs');
-    setSongs(data);
-    setSongSearch('');
-    setShowSongPicker(true);
-  }
-
-  async function searchSongs(q) {
-    setSongSearch(q);
-    const data = await api.get(`/api/songs${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-    setSongs(data);
-  }
-
-  function addToQueue(songId) {
-    const socket = getSocket();
-    socket?.emit('queue:add', { songId }, (ack) => {
-      if (!ack?.error) setShowSongPicker(false);
+    // 실시간 친구 상태 업데이트 수신
+    socket?.on('friend:update', ({ fromId, status }) => {
+      setFriendStatuses(prev => ({ ...prev, [fromId]: status }));
     });
-  }
 
-  function sendReaction(emoji) {
+    return () => {
+      socket?.off('friend:update');
+    };
+  }, [roomId, navigate, start]);
+
+  // 2. [수정] 나가기 버튼 로직 (무조건 나가기 보장)
+  const handleLeave = async () => {
+    console.log("퇴장 처리 시작...");
     const socket = getSocket();
-    socket?.emit('user:reaction', { emoji });
-  }
+    
+    try {
+      // 서버에 퇴장 알림
+      socket?.emit('room:leave');
 
-  async function handleVoice() {
-    if (connected) { stop(); } else { await start(roomId); }
-  }
+      // 음성 엔진 종료 (최대 1초 대기)
+      await Promise.race([
+        stop(),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
+    } catch (err) {
+      console.error("퇴장 과정 중 오류:", err);
+    } finally {
+      // [중요] 전역 상태를 강제로 비워야 HomePage의 useEffect가 다시 방으로 안 던집니다.
+      useRoomStore.setState({ 
+        roomId: null, 
+        joinCode: null, 
+        participants: [], 
+        currentSong: null 
+      });
 
-  const statusLabel = { waiting: '대기 중', singing: '노래 중', result: '결과' }[status];
-  const statusColor = { waiting: '#aaa', singing: '#e94560', result: '#f9ca24' }[status];
+      // 메인으로 강제 이동
+      navigate('/', { replace: true });
+    }
+  };
+
+  // 3. 친구 요청/수락 핸들러
+  const handleFriendRequest = (targetId) => {
+    const socket = getSocket();
+    const currentStatus = friendStatuses[targetId];
+    
+    // 상대가 보낸 상태면 accept, 아니면 request
+    const eventType = currentStatus === 'received' ? 'friend:accept' : 'friend:request';
+    socket?.emit(eventType, { targetId });
+
+    // 화면 즉시 반영
+    setFriendStatuses(prev => ({
+      ...prev,
+      [targetId]: currentStatus === 'received' ? 'friend' : 'sent'
+    }));
+  };
+
+  // 4. 이모지 리액션 전송
+  const sendReaction = useCallback((emoji) => {
+    getSocket()?.emit('user:reaction', { emoji });
+  }, []);
+
+  // roomId가 비워지는 순간 컴포넌트 렌더링 중단
+  if (!roomId) return null;
 
   return (
     <div style={styles.container}>
+      {/* 상단 바 */}
       <header style={styles.header}>
-        <div>
-          <span style={styles.logo}>🎤 FamilyLink</span>
-          <span style={{ ...styles.statusBadge, background: statusColor }}>{statusLabel}</span>
+        <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
+        <div style={styles.roomInfo}>
+          <span style={styles.roomCode}>방 코드: {joinCode}</span>
         </div>
-        <div style={styles.headerRight}>
-          <span style={styles.codeLabel}>코드: <b>{joinCode}</b></span>
-          <motion.button style={styles.leaveBtn} onClick={handleLeave} whileTap={{ scale: 0.95 }}>
-            나가기
-          </motion.button>
-        </div>
+        <button 
+          onClick={() => toggleMute()} 
+          style={{...styles.muteBtn, background: muted ? '#ff4b2b' : 'transparent'}}
+        >
+          {muted ? '🔇 마이크 꺼짐' : '🎤 마이크 켜짐'}
+        </button>
       </header>
 
-      <main style={styles.main}>
-        {/* 현재 재생 중 */}
-        <section style={styles.nowPlaying}>
-          <AnimatePresence mode="wait">
-            {currentSong ? (
-              <motion.div
-                key={currentSong.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-                transition={{ duration: 0.3 }}
-              >
-                {currentSong.thumbnail && (
-                  <img src={currentSong.thumbnail} alt="" style={styles.nowThumb} />
-                )}
-                <div style={styles.nowInfo}>
-                  <p style={styles.nowTitle}>{currentSong.title}</p>
-                  <p style={styles.nowArtist}>{currentSong.artist}</p>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.p
-                key="no-song"
-                style={styles.noSong}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                {status === 'result' ? '🏆 노래 종료' : '노래를 신청하거나 기다려주세요'}
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </section>
-
-        {/* 가사 싱크 */}
-        {currentSong && (
-          <div style={styles.lyricsBar}>
-            <div
-              style={{
-                ...styles.lyricsProgress,
-                width: `${Math.min((currentMs / ((currentSong.duration || 1) * 1000)) * 100, 100)}%`,
-              }}
-            />
-            <span style={styles.lyricsTime}>{formatMs(currentMs)}</span>
+      {/* 중앙: 현재 노래 정보 */}
+      <div style={styles.mainDisplay}>
+        {currentSong ? (
+          <div style={styles.songCard}>
+            <h2 style={styles.songTitle}>{currentSong.title}</h2>
+            <p style={styles.songArtist}>{currentSong.artist}</p>
           </div>
+        ) : (
+          <div style={styles.emptyCard}>예약된 노래가 없습니다.</div>
         )}
+      </div>
 
-        {/* 점수 결과 */}
-        <AnimatePresence>
-          {status === 'result' && lastScore !== null && (
-            <motion.div
-              style={styles.scoreBox}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            >
-              🏆 점수: <strong>{lastScore}점</strong>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* 참여자 목록 & 친구 버튼 */}
+      <div style={styles.participantSection}>
+        <h3 style={styles.subTitle}>함께 있는 친구들</h3>
+        <div style={styles.userList}>
+          {participants.map((p) => {
+            const isMe = p.id === user?.id;
+            const status = friendStatuses[p.id];
+            const isReceived = status === 'received';
+            const isActionDisabled = isMe || status === 'friend' || status === 'sent';
 
-        {/* 리액션 */}
-        <div style={styles.reactionRow}>
-          {EMOJIS.map((emoji) => (
-            <motion.button
-              key={emoji}
-              style={styles.emojiBtn}
-              onClick={() => sendReaction(emoji)}
-              whileTap={{ scale: 0.75 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-            >
-              {emoji}
-            </motion.button>
+            return (
+              <div key={p.id} style={styles.userItem}>
+                <div style={styles.userInfo}>
+                  <div style={styles.avatar}>{p.nickname?.[0]}</div>
+                  <span style={styles.userName}>{p.nickname} {isMe && "(나)"}</span>
+                </div>
+                {!isMe && (
+                  <button
+                    onClick={() => handleFriendRequest(p.id)}
+                    disabled={isActionDisabled}
+                    style={{
+                      ...styles.friendBtn,
+                      ...(isReceived ? styles.receivedEffect : {}),
+                      ...(status === 'friend' ? styles.alreadyFriend : {}),
+                      opacity: isActionDisabled && status !== 'friend' ? 0.5 : 1
+                    }}
+                  >
+                    {status === 'friend' ? '✓ 친구' : 
+                     status === 'sent' ? '요청됨' : 
+                     isReceived ? '🤝 친구 수락!' : '➕ 친구 추가'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 하단: 리액션 및 예약 */}
+      <footer style={styles.footer}>
+        <div style={styles.emojiRow}>
+          {EMOJIS.map(e => (
+            <button key={e} onClick={() => sendReaction(e)} style={styles.emojiBtn}>{e}</button>
           ))}
         </div>
-
-        {/* 리액션 피드 */}
-        <div style={styles.reactionFeed}>
-          <AnimatePresence>
-            {[...reactions].reverse().slice(0, 5).map((r, i) => (
-              <motion.span
-                key={`${r.nickname}-${i}`}
-                style={styles.reactionItem}
-                initial={{ opacity: 0, scale: 0.7 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.7 }}
-                transition={{ duration: 0.2 }}
-              >
-                {r.nickname}: {r.emoji}
-              </motion.span>
-            ))}
-          </AnimatePresence>
-        </div>
-
-        {/* 탭 */}
-        <div style={styles.tabRow}>
-          <motion.button
-            style={{ ...styles.tab, ...(tab === 'queue' ? styles.tabActive : {}) }}
-            onClick={() => setTab('queue')}
-            whileTap={{ scale: 0.97 }}
-          >
-            대기열 ({queue.length})
-          </motion.button>
-          <motion.button
-            style={{ ...styles.tab, ...(tab === 'score' ? styles.tabActive : {}) }}
-            onClick={() => setTab('score')}
-            whileTap={{ scale: 0.97 }}
-          >
-            점수판
-          </motion.button>
-        </div>
-
-        {/* 대기열 */}
-        {tab === 'queue' && (
-          <div>
-            <motion.button
-              style={styles.addSongBtn}
-              onClick={openSongPicker}
-              whileTap={{ scale: 0.97 }}
-            >
-              + 노래 신청
-            </motion.button>
-            {queue.length === 0 && <p style={styles.empty}>대기열이 비어있습니다.</p>}
-            {queue.map((item, idx) => (
-              <motion.div
-                key={item.id}
-                style={styles.queueItem}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: idx * 0.04 }}
-              >
-                <span style={styles.queuePos}>{idx + 1}</span>
-                <div style={styles.queueInfo}>
-                  <span style={styles.queueTitle}>{item.title}</span>
-                  <span style={styles.queueBy}>신청: {item.requested_by_nickname}</span>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        )}
-
-        {tab === 'score' && (
-          <p style={styles.empty}>이번 세션 점수가 여기에 표시됩니다.</p>
-        )}
-
-        {/* 음성 연결 */}
-        <div style={styles.voiceArea}>
-          <motion.button
-            style={{ ...styles.voiceBtn, background: connected ? '#e94560' : '#0f3460' }}
-            onClick={handleVoice}
-            whileTap={{ scale: 0.96 }}
-          >
-            {connected ? (muted ? '🔇 음소거 해제' : '🎙️ 연결됨') : '🎙️ 음성 연결'}
-          </motion.button>
-          <AnimatePresence>
-            {connected && (
-              <motion.button
-                style={styles.muteBtn}
-                onClick={toggleMute}
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {muted ? '음소거 해제' : '음소거'}
-              </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
-      </main>
-
-      {/* 노래 선택 모달 */}
-      <AnimatePresence>
-        {showSongPicker && (
-          <motion.div
-            style={styles.overlay}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setShowSongPicker(false)}
-          >
-            <motion.div
-              style={styles.modal}
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 style={styles.modalTitle}>노래 신청</h3>
-              <input
-                style={styles.input}
-                placeholder="검색"
-                value={songSearch}
-                onChange={(e) => searchSongs(e.target.value)}
-                autoFocus
-              />
-              <div style={styles.modalList}>
-                {songs.map((song, i) => (
-                  <motion.div
-                    key={song.id}
-                    style={styles.modalItem}
-                    onClick={() => addToQueue(song.id)}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.15, delay: i * 0.03 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div>
-                      <p style={styles.modalSongTitle}>{song.title}</p>
-                      <p style={styles.modalSongArtist}>{song.artist}</p>
-                    </div>
-                    <span style={styles.modalAdd}>+</span>
-                  </motion.div>
-                ))}
-              </div>
-              <motion.button
-                style={styles.closeBtn}
-                onClick={() => setShowSongPicker(false)}
-                whileTap={{ scale: 0.97 }}
-              >
-                닫기
-              </motion.button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <button style={styles.addSongBtn}>🎶 노래 예약하기</button>
+      </footer>
     </div>
   );
 }
 
-function formatMs(ms) {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, '0')}`;
-}
-
 const styles = {
-  container:   { minHeight: '100vh', background: '#0f0f1a', color: '#fff' },
-  header: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '14px 20px', background: 'rgba(255,255,255,0.04)',
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
-  },
-  logo:        { fontSize: 18, fontWeight: 700, marginRight: 10 },
-  statusBadge: { fontSize: 11, padding: '3px 8px', borderRadius: 20, color: '#fff' },
-  headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
-  codeLabel:   { fontSize: 13, color: '#aaa' },
-  leaveBtn: {
-    padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)',
-    background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: 13,
-  },
-  main:        { maxWidth: 600, margin: '0 auto', padding: '16px' },
-  nowPlaying: {
-    display: 'flex', alignItems: 'center', gap: 14, padding: '16px',
-    borderRadius: 14, background: 'rgba(233,69,96,0.1)',
-    border: '1px solid rgba(233,69,96,0.3)', marginBottom: 12,
-    minHeight: 76,
-  },
-  nowThumb:    { width: 64, height: 46, objectFit: 'cover', borderRadius: 8 },
-  nowInfo:     { flex: 1 },
-  nowTitle:    { margin: 0, fontWeight: 700, fontSize: 16 },
-  nowArtist:   { margin: '2px 0 0', color: '#aaa', fontSize: 13 },
-  noSong:      { color: '#555', margin: 0, flex: 1, textAlign: 'center' },
-  lyricsBar: {
-    position: 'relative', height: 6, background: 'rgba(255,255,255,0.1)',
-    borderRadius: 3, marginBottom: 8, overflow: 'hidden',
-  },
-  lyricsProgress: { position: 'absolute', left: 0, top: 0, height: '100%', background: '#e94560', transition: 'width 0.1s linear' },
-  lyricsTime:     { display: 'block', textAlign: 'right', fontSize: 11, color: '#666', marginTop: 2 },
-  scoreBox: {
-    padding: '12px 16px', borderRadius: 12, background: 'rgba(249,202,36,0.15)',
-    border: '1px solid rgba(249,202,36,0.3)', textAlign: 'center', marginBottom: 12, fontSize: 18,
-  },
-  reactionRow:  { display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
-  emojiBtn: {
-    padding: '8px 14px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.15)',
-    background: 'rgba(255,255,255,0.05)', fontSize: 20, cursor: 'pointer',
-  },
-  reactionFeed: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
-  reactionItem: { fontSize: 12, color: '#aaa', background: 'rgba(255,255,255,0.06)', padding: '3px 8px', borderRadius: 10 },
-  tabRow:   { display: 'flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)', marginBottom: 14 },
-  tab: {
-    flex: 1, padding: '10px 0', background: 'transparent',
-    border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14,
-    transition: 'background 0.2s, color 0.2s',
-  },
-  tabActive: { background: '#e94560', color: '#fff', fontWeight: 700 },
-  addSongBtn: {
-    width: '100%', padding: '11px 0', borderRadius: 10, border: '1px dashed rgba(255,255,255,0.2)',
-    background: 'transparent', color: '#aaa', cursor: 'pointer', fontSize: 14, marginBottom: 10,
-  },
-  queueItem: {
-    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-    borderRadius: 10, background: 'rgba(255,255,255,0.04)', marginBottom: 6,
-  },
-  queuePos:   { fontSize: 14, color: '#666', minWidth: 20, textAlign: 'center' },
-  queueInfo:  { flex: 1 },
-  queueTitle: { display: 'block', fontSize: 14, fontWeight: 600 },
-  queueBy:    { display: 'block', fontSize: 12, color: '#aaa' },
-  empty:      { color: '#555', textAlign: 'center', padding: '20px 0' },
-  voiceArea:  { display: 'flex', gap: 10, marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.08)' },
-  voiceBtn: {
-    flex: 1, padding: '13px 0', borderRadius: 12, border: 'none',
-    color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer',
-  },
-  muteBtn: {
-    padding: '13px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.2)',
-    background: 'transparent', color: '#fff', cursor: 'pointer', overflow: 'hidden',
-  },
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-    display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100,
-  },
-  modal: {
-    background: '#1a1a2e', borderRadius: '20px 20px 0 0',
-    padding: '24px 16px', width: '100%', maxWidth: 500,
-    maxHeight: '75vh', display: 'flex', flexDirection: 'column', gap: 12,
-  },
-  modalTitle:      { margin: 0, fontSize: 18, fontWeight: 700 },
-  modalList:       { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 },
-  modalItem: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.05)', cursor: 'pointer',
-  },
-  modalSongTitle:  { margin: 0, fontSize: 14, fontWeight: 600 },
-  modalSongArtist: { margin: '2px 0 0', fontSize: 12, color: '#aaa' },
-  modalAdd:        { fontSize: 22, color: '#e94560' },
-  closeBtn: {
-    padding: '11px 0', borderRadius: 10, border: 'none',
-    background: 'rgba(255,255,255,0.08)', color: '#fff', cursor: 'pointer',
-  },
-  input: {
-    padding: '11px 14px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)',
-    background: 'rgba(255,255,255,0.07)', color: '#fff', fontSize: 15, outline: 'none',
-  },
+  container: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: '20px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  leaveBtn: { padding: '15px 25px', borderRadius: 12, background: '#53354a', color: '#fff', border: 'none', fontSize: 20, fontWeight: 'bold', cursor: 'pointer' },
+  roomCode: { fontSize: 26, fontWeight: 'bold', color: '#e94560' },
+  muteBtn: { padding: '15px 20px', borderRadius: 12, border: '2px solid #e94560', color: '#fff', fontSize: 18, fontWeight: 'bold', cursor: 'pointer' },
+  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '20px 0' },
+  songCard: { textAlign: 'center', padding: '40px', background: 'rgba(233, 69, 96, 0.1)', borderRadius: 30, border: '2px solid #e94560', width: '100%' },
+  songTitle: { fontSize: 42, margin: '0 0 10px' },
+  songArtist: { fontSize: 24, color: '#aaa' },
+  emptyCard: { fontSize: 24, color: '#666' },
+  participantSection: { marginBottom: 30 },
+  subTitle: { fontSize: 22, color: '#e94560', marginBottom: 15 },
+  userList: { display: 'flex', flexDirection: 'column', gap: 12 },
+  userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px 20px', borderRadius: 20 },
+  userInfo: { display: 'flex', alignItems: 'center', gap: 15 },
+  avatar: { width: 50, height: 50, borderRadius: '50%', background: '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 'bold' },
+  userName: { fontSize: 22, fontWeight: '500' },
+  friendBtn: { padding: '12px 20px', borderRadius: 12, border: 'none', background: '#30475e', color: '#fff', fontSize: 18, fontWeight: 'bold', cursor: 'pointer' },
+  receivedEffect: { background: '#f9d423', color: '#1a1a2e', boxShadow: '0 0 15px #f9d423', animation: 'pulse 1.5s infinite' },
+  alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
+  footer: { display: 'flex', flexDirection: 'column', gap: 15 },
+  emojiRow: { display: 'flex', justifyContent: 'space-between', marginBottom: 10 },
+  emojiBtn: { fontSize: 40, background: 'transparent', border: 'none', cursor: 'pointer' },
+  addSongBtn: { padding: '20px', borderRadius: 20, background: '#e94560', color: '#fff', fontSize: 24, fontWeight: 'bold', border: 'none', cursor: 'pointer' }
 };
