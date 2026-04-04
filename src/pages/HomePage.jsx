@@ -119,7 +119,28 @@ export default function HomePage() {
   const handleCreateRoom = () => {
     setError('');
     setLoading(true);
-    getSocket()?.emit('room:create');
+    
+    // [수정됨] 빈 페이로드({})와 응답을 처리할 콜백 함수(res)를 추가
+    getSocket()?.emit('room:create', {}, (res) => {
+      // 1. 서버에서 에러를 반환한 경우
+      if (res?.error) {
+        setError(res.error);
+        setLoading(false);
+      } 
+      // 2. 서버가 방 정보를 직접 콜백으로 돌려준 경우 즉시 스토어 업데이트 및 이동
+      else if (res?.roomId) {
+        useRoomStore.setState({
+          roomId: res.roomId,
+          joinCode: res.joinCode,
+          participants: res.participants || [],
+          currentSong: res.currentSong || null
+        });
+        setLoading(false);
+      }
+    });
+
+    // [수정됨] 혹시라도 서버가 무응답일 경우 무한 로딩에 빠지지 않도록 5초 후 리셋
+    setTimeout(() => setLoading(false), 5000);
   };
 
   // --- 친구 관리 핸들러 (기존 기능 그대로 포함) ---
