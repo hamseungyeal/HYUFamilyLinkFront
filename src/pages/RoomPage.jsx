@@ -12,6 +12,8 @@ export default function RoomPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   
+  // [추가] 친구 명단 가져오기 (초대용)
+  const friends = useAuthStore((s) => s.friends);
   const friendStatuses = useAuthStore((s) => s.friendStatuses);
   const refreshFriends = useAuthStore((s) => s.refreshFriends);
 
@@ -25,6 +27,10 @@ export default function RoomPage() {
   const [activeReactions, setActiveReactions] = useState([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
+
+  // [초대 기능] 관련 상태 추가
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [selectedFriends, setSelectedFriends] = useState([]);
 
   // 1. 방 관리 및 실시간 리스너
   useEffect(() => {
@@ -66,11 +72,10 @@ export default function RoomPage() {
       }));
     };
 
-    // [수정] 소켓 업데이트 시 객체 구조({status, nickname})를 유지하도록 보강
     const onFriendUpdate = (payload) => {
       if (isLeaving.current) return;
       if (!payload || !payload.fromId) {
-        refreshFriends(); // 페이로드가 없으면 전체 새로고침
+        refreshFriends(); 
         return;
       }
       useAuthStore.setState((prev) => {
@@ -116,12 +121,10 @@ export default function RoomPage() {
 
   const handleFriendAction = (targetId) => {
     const socket = getSocket();
-    // [수정] 현재 상태를 안전하게 추출
     const statusData = friendStatuses[targetId];
-    const current = statusData?.status || statusData; // 객체면 .status, 아니면 문자열 자체
+    const current = statusData?.status || statusData; 
     const event = current === 'received' ? 'friend:accept' : 'friend:request';
     
-    // [수정] 낙관적 업데이트를 객체 구조에 맞게 갱신
     useAuthStore.setState((prev) => ({
       friendStatuses: {
         ...prev.friendStatuses,
@@ -131,6 +134,32 @@ export default function RoomPage() {
 
     socket?.emit(event, { targetId });
   };
+
+  // [초대 기능] 핸들러 추가
+  const toggleFriendSelect = (friendId) => {
+    setSelectedFriends(prev => 
+      prev.includes(friendId) ? prev.filter(id => id !== friendId) : [...prev, friendId]
+    );
+  };
+
+  const handleSendInvites = () => {
+    if (selectedFriends.length === 0) return;
+    
+    getSocket()?.emit('room:send_invites', { 
+      invitedFriends: selectedFriends,
+      roomId: roomId,
+      joinCode: joinCode,
+      currentSong: currentSong?.title || '대기 중',
+      participantCount: participants.length
+    });
+    
+    alert('친구를 초대했습니다!');
+    setShowInviteModal(false);
+    setSelectedFriends([]);
+  };
+
+  // 이미 방에 있는 친구는 초대 목록에서 제외
+  const invitableFriends = friends?.filter(f => !participants.some(p => p.id === f.id)) || [];
 
   const sendEmoji = (emoji) => { getSocket()?.emit('user:reaction', { emoji }); };
   const searchSongs = async (q) => {
@@ -177,14 +206,27 @@ export default function RoomPage() {
       </div>
 
       <div style={styles.participantSection}>
-        <h3 style={styles.subTitle}>함께 있는 친구들 ({participants.length}명)</h3>
+        {/* [초대 기능] 헤더 영역 변경 */}
+        <div style={styles.participantHeader}>
+          <h3 style={styles.subTitle}>함께 있는 친구들 ({participants.length}/6명)</h3>
+          <button 
+            onClick={() => {
+              setSelectedFriends([]);
+              setShowInviteModal(true);
+            }} 
+            style={styles.inviteBtn}
+            disabled={participants.length >= 6}
+          >
+            {participants.length >= 6 ? '꽉 찬 방' : '+ 친구 초대'}
+          </button>
+        </div>
+
         <div style={styles.userList}>
           {participants.map((p) => {
             const isMe = p.id === user?.id;
             
-            // [수정] 객체 구조에서 상태 문자열만 안전하게 추출
             const statusData = friendStatuses[p.id]; 
-            const currentStatus = statusData?.status || statusData; // 하위 호환성 보장
+            const currentStatus = statusData?.status || statusData; 
             
             const isReceived = currentStatus === 'received';
             const isFriend = currentStatus === 'friend';
@@ -235,6 +277,60 @@ export default function RoomPage() {
           </div>
         </div>
       )}
+
+      {/* ========================================= */}
+      {/* [초대 기능] 룸 내부 친구 초대 모달 */}
+      {/* ========================================= */}
+      {showInviteModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <h2 style={{color: '#e94560', margin: '0 0 15px 0'}}>방으로 친구 초대</h2>
+            <p style={{color: '#aaa', marginBottom: '20px'}}>
+              지금 바로 방에 참여할 친구를 선택하세요.
+            </p>
+            
+            <div style={styles.inviteFriendList}>
+              {invitableFriends.length === 0 ? (
+                <div style={{textAlign: 'center', color: '#666', padding: '20px 0'}}>
+                  초대할 수 있는 친구가 없습니다.
+                </div>
+              ) : (
+                invitableFriends.map(friend => (
+                  <div 
+                    key={friend.id} 
+                    style={{
+                      ...styles.inviteItem,
+                      border: selectedFriends.includes(friend.id) ? '2px solid #e94560' : '2px solid transparent',
+                      background: selectedFriends.includes(friend.id) ? 'rgba(233, 69, 96, 0.2)' : 'rgba(255,255,255,0.05)'
+                    }}
+                    onClick={() => toggleFriendSelect(friend.id)}
+                  >
+                    <span style={{fontSize: 18, fontWeight: 'bold'}}>{friend.nickname}</span>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: '50%', border: '2px solid #fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: selectedFriends.includes(friend.id) ? '#e94560' : 'transparent'
+                    }}>
+                      {selectedFriends.includes(friend.id) && '✓'}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button onClick={() => setShowInviteModal(false)} style={styles.cancelBtn}>취소</button>
+              <button 
+                onClick={handleSendInvites} 
+                style={{...styles.confirmBtn, opacity: selectedFriends.length === 0 ? 0.5 : 1}}
+                disabled={selectedFriends.length === 0}
+              >
+                {selectedFriends.length > 0 ? `${selectedFriends.length}명 초대하기` : '친구를 선택하세요'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -254,8 +350,13 @@ const styles = {
   songTitle: { fontSize: 42, margin: '0 0 10px' },
   songArtist: { fontSize: 24, color: '#aaa' },
   emptyCard: { fontSize: 22, color: '#666' },
+  
   participantSection: { marginBottom: 30 },
-  subTitle: { fontSize: 20, color: '#e94560', marginBottom: 10 },
+  // [초대 기능] 헤더 및 버튼 스타일
+  participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  subTitle: { fontSize: 20, color: '#e94560', margin: 0 },
+  inviteBtn: { padding: '8px 16px', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' },
+  
   userList: { display: 'flex', flexDirection: 'column', gap: 10 },
   userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: 15 },
   userInfo: { display: 'flex', alignItems: 'center', gap: 12 },
@@ -268,11 +369,17 @@ const styles = {
   emojiRow: { display: 'flex', justifyContent: 'space-between' },
   emojiBtn: { fontSize: 40, background: 'transparent', border: 'none', cursor: 'pointer' },
   addSongBtn: { padding: '18px', borderRadius: 15, background: '#e94560', color: '#fff', fontSize: 22, fontWeight: 'bold', border: 'none', cursor: 'pointer' },
+  
+  // [초대 기능] 모달 스타일
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 200 },
-  modal: { background: '#16213e', width: '100%', maxWidth: 500, borderRadius: 20, padding: 20, maxHeight: '80vh', display: 'flex', flexDirection: 'column' },
+  modal: { background: '#1a1a2e', width: '100%', maxWidth: 400, borderRadius: 20, padding: 30, display: 'flex', flexDirection: 'column', border: '1px solid #333' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: 15 },
   closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: 20, cursor: 'pointer' },
   searchInput: { padding: 15, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 18, marginBottom: 15 },
-  songList: { flex: 1, overflowY: 'auto' },
-  songItem: { padding: 15, borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' }
+  songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh' },
+  songItem: { padding: 15, borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' },
+  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '300px', overflowY: 'auto', marginBottom: 20 },
+  inviteItem: { display: 'flex', justifyContent: 'space-between', padding: '15px', borderRadius: 15, cursor: 'pointer', transition: 'all 0.2s ease' },
+  cancelBtn: { flex: 1, padding: '15px', borderRadius: 10, border: 'none', background: '#444', color: '#fff', fontSize: 16, fontWeight: 'bold', cursor: 'pointer' },
+  confirmBtn: { flex: 2, padding: '15px', borderRadius: 10, border: 'none', background: '#e94560', color: '#fff', fontSize: 16, fontWeight: 'bold', cursor: 'pointer' }
 };
