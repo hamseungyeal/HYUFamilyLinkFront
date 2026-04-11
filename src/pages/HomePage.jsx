@@ -49,6 +49,9 @@ export default function HomePage() {
     const onRoomState = (data) => {
       setLoadingType(null); 
       if (data.roomId) {
+        // [수정] 방에 성공적으로 입장하면, 해당 방에 대한 초대장은 목록에서 제거합니다.
+        setInvitations(prev => prev.filter(inv => inv.roomId !== data.roomId));
+        
         useRoomStore.setState({
           roomId: data.roomId,
           joinCode: data.joinCode,
@@ -70,9 +73,9 @@ export default function HomePage() {
     const onRoomInvite = (inviteData) => {
       console.log("💌 방 초대 도착:", inviteData);
       setInvitations(prev => {
-        // 이미 있는 초대면 중복 추가 방지
-        if (prev.some(inv => inv.id === inviteData.id)) return prev;
-        return [{ ...inviteData, isInvite: true }, ...prev];
+        // [수정] 중복 초대 방지: 같은 방(roomId)에서 온 초대가 이미 있다면 덮어쓰고, 없으면 맨 앞에 추가합니다.
+        const filtered = prev.filter(inv => inv.roomId !== inviteData.roomId);
+        return [{ ...inviteData, isInvite: true }, ...filtered];
       });
     };
 
@@ -80,7 +83,7 @@ export default function HomePage() {
     socket.on('friend:update', onFriendUpdate);
     socket.on('rooms:updated', onRoomsUpdated);
     socket.on('error', onSocketError);
-    socket.on('room:invite', onRoomInvite); // 이벤트 추가
+    socket.on('room:invite', onRoomInvite); 
     
     return () => {
       socket.off('room:state', onRoomState);
@@ -94,7 +97,7 @@ export default function HomePage() {
   useEffect(() => {
     fetchActiveRooms();
     refreshFriends();
-    const timer = setInterval(fetchActiveRooms, 5000);
+    const timer = setInterval(fetchActiveRooms, 1000);
     return () => clearInterval(timer);
   }, [fetchActiveRooms, refreshFriends]);
 
@@ -102,7 +105,7 @@ export default function HomePage() {
     setError('');
     setLoadingType('match');
     getSocket()?.emit('room:match');
-    setTimeout(() => setLoadingType(null), 5000); 
+    setTimeout(() => setLoadingType(null), 3000); 
   };
 
   const handleJoinByCode = (code) => {
@@ -117,50 +120,44 @@ export default function HomePage() {
     });
   };
 
-  // [초대 기능] 1. 방 만들기 버튼 클릭 시 모달 열기
   const openCreateRoomModal = () => {
-    setSelectedFriends([]); // 선택 초기화
+    setSelectedFriends([]); 
     setShowInviteModal(true);
   };
 
-  // [초대 기능] 2. 모달 내 친구 선택 토글
   const toggleFriendSelect = (friendId) => {
     setSelectedFriends(prev => 
       prev.includes(friendId) ? prev.filter(id => id !== friendId) : [...prev, friendId]
     );
   };
 
-  // [초대 기능] 3. 확인 버튼 누르면 실제 방 생성 (+초대명단 전송)
   const executeCreateRoom = () => {
     setError('');
     setLoadingType('create');
     setShowInviteModal(false);
     
-    // 서버에 방 생성과 함께 초대할 친구 목록을 보냄
     getSocket()?.emit('room:create', { invitedFriends: selectedFriends });
-    setTimeout(() => setLoadingType(null), 5000);
+    setTimeout(() => setLoadingType(null), 3000);
   };
 
   const handleFriendAccept = (targetId) => getSocket()?.emit('friend:accept', { targetId });
-  
-  // [수정] 친구 삭제, 거절, 취소 처리를 통합하여 핸들링
   const handleFriendRemove = (targetId, actionType) => {
-    let confirmMsg = "정말 이 친구를 삭제하시겠습니까?"; // 기본값: 삭제 ('remove')
+    let confirmMsg = "정말 이 친구를 삭제하시겠습니까?"; 
     
     if (actionType === 'reject') confirmMsg = "친구 요청을 거절하시겠습니까?";
     if (actionType === 'cancel') confirmMsg = "보낸 친구 요청을 취소하시겠습니까?";
 
     if (window.confirm(confirmMsg)) {
       console.log(`🗑️ 친구 ${actionType} 시도:`, targetId);
-      // 백엔드는 삭제/거절/취소 모두 동일하게 friend:remove 이벤트를 사용하여 관계(row)를 지웁니다.
       getSocket()?.emit('friend:remove', { targetId });
     }
   };
 
-  // [초대 기능] 초대받은 방과 일반 방 목록 병합 (초대받은 방이 맨 위로)
+  // [수정] 방 목록 병합 (초대받은 방 최상단 유지 & 중복 노출 완벽 차단)
+  // API로 불러온 activeRooms 중, invitations에 이미 존재하는 roomId는 걸러냅니다.
   const combinedRooms = [
     ...invitations,
-    ...activeRooms.filter(ar => !invitations.some(inv => inv.id === ar.id)) // 중복 제거
+    ...activeRooms.filter(ar => !invitations.some(inv => inv.roomId === ar.id)) 
   ];
 
   return (
@@ -182,19 +179,15 @@ export default function HomePage() {
         <button onClick={handleRandomMatch} style={styles.randomBtn} disabled={!!loadingType}>
           ⚡ {loadingType === 'match' ? '매칭 중...' : '모르는 친구와 노래하기'}
         </button>
-        {/* 버튼 통합 및 명칭 변경 */}
         <button onClick={() => setShowFriendManager(!showFriendManager)} style={styles.friendSingBtn}>
           {showFriendManager ? '✕ 친구 관리창 닫기' : '👥 친구 관리 및 찾기'}
         </button>
       </div>
 
-      {/* --- 친구 관리 패널 --- */}
       {showFriendManager && (
         <div style={styles.friendPanel}>
           <h3 style={styles.panelTitle}>내 친구 관리</h3>
           <div style={styles.friendList}>
-            
-            {/* 1. 받은 요청 목록 */}
             {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'received').map(([id, data]) => (
               <div key={id} style={styles.friendItem}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -207,13 +200,10 @@ export default function HomePage() {
                 </div>
               </div>
             ))}
-            
-            {/* 데이터가 비었을 때 */}
             {friends.length === 0 && !Object.values(friendStatuses).some(data => (data.status || data) === 'received' || (data.status || data) === 'sent') ? (
               <p style={{color: '#aaa', fontSize: 18}}>현재 등록된 친구가 없습니다.</p>
             ) : (
               <>
-                {/* 2. 확정된 친구 목록 */}
                 {friends.map(friend => (
                   <div key={friend.id} style={styles.friendItem}>
                     <div>
@@ -223,15 +213,12 @@ export default function HomePage() {
                     <button onClick={() => handleFriendRemove(friend.id, 'remove')} style={styles.deleteBtn}>삭제</button>
                   </div>
                 ))}
-                
-                {/* 3. 보낸 요청 목록 (취소 버튼 추가) */}
                 {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'sent').map(([id, data]) => (
                   <div key={id} style={{...styles.friendItem, opacity: 0.6}}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <span style={{color: '#aaa'}}>요청 대기 중...</span>
                       <span style={{fontSize: 13, marginTop: 4}}>{data.nickname ? `${data.nickname}님에게` : `ID: ${id.slice(0, 5)}`}</span>
                     </div>
-                    {/* [추가] 취소 버튼 */}
                     <button onClick={() => handleFriendRemove(id, 'cancel')} style={styles.cancelReqBtn}>취소</button>
                   </div>
                 ))}
@@ -241,7 +228,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* --- 방 목록 섹션 (초대 & 꽉 찬 방 UI 반영) --- */}
+      {/* --- 방 목록 섹션 --- */}
       <div style={styles.roomSection}>
         <h2 style={styles.sectionTitle}>지금 열려있는 노래방</h2>
         <div style={styles.scrollContainer}>
@@ -249,15 +236,14 @@ export default function HomePage() {
             <div style={styles.emptyRooms}>현재 열려있는 노래방이 없습니다.</div>
           ) : (
             combinedRooms.map((room) => {
-              const isFull = room.participantCount >= 6; // 6명 제한 체크
-              const isInvite = room.isInvite; // 초대 여부 체크
+              const isFull = room.participantCount >= 6; 
+              const isInvite = room.isInvite; 
 
               return (
                 <div 
-                  key={room.id} 
+                  key={room.id || room.roomId} 
                   style={{
                     ...styles.roomCard, 
-                    // 초대받은 방은 반짝이는 이펙트, 꽉 찬 방은 반투명 처리
                     ...(isInvite ? { animation: 'inviteGlow 1.5s infinite', border: '2px solid #f9d423' } : {}),
                     ...(isFull ? { opacity: 0.5, cursor: 'not-allowed' } : {})
                   }} 
@@ -287,7 +273,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* --- 방 만들기 & 입장 --- */}
       <div style={styles.section}>
         <h2 style={styles.sectionTitle}>방 코드로 직접 들어가기</h2>
         <div style={styles.joinRow}>
@@ -303,15 +288,11 @@ export default function HomePage() {
         </div>
         {error && <p style={styles.error}>{error}</p>}
         
-        {/* [초대 기능] 클릭 시 모달 열기 및 버튼명 변경 */}
         <button onClick={openCreateRoomModal} style={styles.createBtn} disabled={!!loadingType}>
           🏠 {loadingType === 'create' ? '방 만드는 중...' : '초대하고 방 만들기'}
         </button>
       </div>
 
-      {/* ========================================= */}
-      {/* [초대 기능] 방 생성 전 친구 초대 모달 */}
-      {/* ========================================= */}
       {showInviteModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
@@ -380,7 +361,6 @@ const styles = {
   acceptBtn: { padding: '8px 15px', background: '#f9d423', color: '#1a1a2e', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer' },
   denyBtn: { padding: '8px 15px', background: '#444', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer' },
   deleteBtn: { padding: '6px 12px', background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' },
-  // [추가] 취소 버튼 스타일 (삭제 버튼과 동일하되 약간 덜 강렬하게)
   cancelReqBtn: { padding: '6px 12px', background: 'transparent', color: '#aaa', border: '1px solid #aaa', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' },
   roomSection: { marginBottom: 40 },
   sectionTitle: { margin: '0 0 16px', fontSize: 22, fontWeight: 800, color: '#e94560' },
@@ -399,8 +379,6 @@ const styles = {
   joinBtn: { padding: '0 30px', borderRadius: 15, border: 'none', background: '#e94560', color: '#fff', fontWeight: 'bold', fontSize: 20 },
   createBtn: { width: '100%', padding: '15px', borderRadius: 15, border: '1px dashed #666', background: 'transparent', color: '#aaa', fontSize: 18, cursor: 'pointer' },
   error: { color: '#ff6b6b', textAlign: 'center', marginTop: 12, fontSize: 18, fontWeight: 'bold' },
-
-  // 초대 모달 스타일 추가
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 },
   modal: { background: '#1a1a2e', padding: '30px', borderRadius: 20, width: '100%', maxWidth: 400, border: '1px solid #333' },
   inviteFriendList: { display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '300px', overflowY: 'auto', marginBottom: 20 },
