@@ -40,7 +40,15 @@ export default function RoomPage() {
     if (!roomId) {
       const savedCode = sessionStorage.getItem('lastJoinCode');
       if (savedCode) {
-        socket.emit('room:join', { joinCode: savedCode });
+        // [수정] 재입장 시 방이 사라졌거나 에러가 난 경우를 대비한 콜백 추가
+        socket.emit('room:join', { joinCode: savedCode }, (res) => {
+          if (res && res.error) {
+            alert('방이 종료되었거나 입장할 수 없습니다.');
+            sessionStorage.removeItem('lastJoinCode');
+            useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null });
+            navigate('/', { replace: true });
+          }
+        });
         return; 
       } else {
         navigate('/', { replace: true });
@@ -65,11 +73,19 @@ export default function RoomPage() {
       if (isLeaving.current) return;
       await refreshFriends();
       
-      useRoomStore.setState((state) => ({
-        ...state,
-        participants: data.participants || state.participants,
-        joinCode: data.joinCode || state.joinCode 
-      }));
+      useRoomStore.setState((state) => {
+        const rawParticipants = data.participants || state.participants;
+        // 값의 일관성을 위해 고유 id를 기준으로 중복 필터링
+        const uniqueParticipants = Array.from(
+          new Map(rawParticipants.map(p => [String(p.id).trim(), p])).values()
+        );
+
+        return {
+          ...state,
+          participants: uniqueParticipants,
+          joinCode: data.joinCode || state.joinCode 
+        };
+      });
     };
 
     const onFriendUpdate = (payload) => {
@@ -158,10 +174,13 @@ export default function RoomPage() {
     setSelectedFriends([]);
   };
 
-  // 이미 방에 있는 친구는 초대 목록에서 제외
-  const invitableFriends = friends?.filter(f => !participants.some(p => p.id === f.id)) || [];
+  // 이미 방에 있는 친구는 초대 목록에서 제외 (일관된 값 처리를 위해 String으로 변환 후 비교)
+  const invitableFriends = friends?.filter(f => 
+    !participants.some(p => String(p.id).trim() === String(f.id).trim())
+  ) || [];
 
   const sendEmoji = (emoji) => { getSocket()?.emit('user:reaction', { emoji }); };
+  
   const searchSongs = async (q) => {
     setSongSearch(q);
     if (!q) return;
@@ -170,6 +189,7 @@ export default function RoomPage() {
       setSongs(data || []); 
     } catch {}
   };
+  
   const reserveSong = (songId) => { getSocket()?.emit('queue:add', { songId }); setShowSongPicker(false); setSongSearch(''); };
 
   if (!roomId && !sessionStorage.getItem('lastJoinCode') && !isLeaving.current) return null;
@@ -223,7 +243,7 @@ export default function RoomPage() {
 
         <div style={styles.userList}>
           {participants.map((p) => {
-            const isMe = p.id === user?.id;
+            const isMe = String(p.id).trim() === String(user?.id).trim();
             
             const statusData = friendStatuses[p.id]; 
             const currentStatus = statusData?.status || statusData; 
@@ -352,7 +372,6 @@ const styles = {
   emptyCard: { fontSize: 22, color: '#666' },
   
   participantSection: { marginBottom: 30 },
-  // [초대 기능] 헤더 및 버튼 스타일
   participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   subTitle: { fontSize: 20, color: '#e94560', margin: 0 },
   inviteBtn: { padding: '8px 16px', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' },
@@ -370,7 +389,6 @@ const styles = {
   emojiBtn: { fontSize: 40, background: 'transparent', border: 'none', cursor: 'pointer' },
   addSongBtn: { padding: '18px', borderRadius: 15, background: '#e94560', color: '#fff', fontSize: 22, fontWeight: 'bold', border: 'none', cursor: 'pointer' },
   
-  // [초대 기능] 모달 스타일
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 200 },
   modal: { background: '#1a1a2e', width: '100%', maxWidth: 400, borderRadius: 20, padding: 30, display: 'flex', flexDirection: 'column', border: '1px solid #333' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: 15 },

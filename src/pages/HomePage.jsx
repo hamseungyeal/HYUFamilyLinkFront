@@ -42,7 +42,7 @@ export default function HomePage() {
     }
   }, []);
 
-  useEffect(() => {
+ useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
@@ -52,10 +52,15 @@ export default function HomePage() {
         // [수정] 방에 성공적으로 입장하면, 해당 방에 대한 초대장은 목록에서 제거합니다.
         setInvitations(prev => prev.filter(inv => inv.roomId !== data.roomId));
         
+        // ✨ [수정된 부분] 참가자 배열에서 고유 id를 기준으로 중복을 엄격하게 제거
+        const uniqueParticipants = data.participants 
+          ? Array.from(new Map(data.participants.map(p => [p.id, p])).values()) 
+          : [];
+
         useRoomStore.setState({
           roomId: data.roomId,
           joinCode: data.joinCode,
-          participants: data.participants,
+          participants: uniqueParticipants, // 중복이 제거된 배열 할당
           currentSong: data.currentSong || null
         });
       }
@@ -73,7 +78,7 @@ export default function HomePage() {
     const onRoomInvite = (inviteData) => {
       console.log("💌 방 초대 도착:", inviteData);
       setInvitations(prev => {
-        // [수정] 중복 초대 방지: 같은 방(roomId)에서 온 초대가 이미 있다면 덮어쓰고, 없으면 맨 앞에 추가합니다.
+        // [수정] 중복 초대 방지: 같은 방(roomId)에서 온 초대가 이미 있다면 덮어쓰고, 없으면 맨 앞에 추가
         const filtered = prev.filter(inv => inv.roomId !== inviteData.roomId);
         return [{ ...inviteData, isInvite: true }, ...filtered];
       });
