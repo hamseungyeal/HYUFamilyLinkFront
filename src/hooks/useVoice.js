@@ -12,17 +12,12 @@ export function useVoice() {
   const [muted,     setMuted]     = useState(false);
 
   async function start(roomId) {
-    // 이미 연결된 상태면 무시
+    // 이미 연결된 상태면 무시 (레이스 컨디션 방지: 비동기 전에 즉시 설정)
     if (clientRef.current) return;
-
-    // 1. BackServer에서 Agora 토큰 발급
-    const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
-
-    // 2. Agora 클라이언트 생성
     const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
     clientRef.current = client;
 
-    // 3. 다른 사용자 음성 자동 구독
+    // 1. 다른 사용자 음성 자동 구독 (join 전에 등록해야 함)
     client.on('user-published', async (remoteUser, mediaType) => {
       console.log('[Agora] user-published:', remoteUser.uid, mediaType);
       await client.subscribe(remoteUser, mediaType);
@@ -32,7 +27,10 @@ export function useVoice() {
       }
     });
 
-    // 4. 채널 입장
+    // 2. BackServer에서 Agora 토큰 발급
+    const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
+
+    // 3. 채널 입장
     await client.join(APP_ID, String(roomId), token, uid);
 
     // 5. 마이크 트랙 생성 및 발행
