@@ -12,6 +12,9 @@ export function useVoice() {
   const [muted,     setMuted]     = useState(false);
 
   async function start(roomId) {
+    // 이미 연결된 상태면 무시
+    if (clientRef.current) return;
+
     // 1. BackServer에서 Agora 토큰 발급
     const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
 
