@@ -154,12 +154,18 @@ export default function HomePage() {
     }
   };
 
+  // 모달 바깥쪽(오버레이) 클릭 시 닫히도록 처리하는 함수
+  const handleModalOutsideClick = (e, setter) => {
+    if (e.target === e.currentTarget) {
+      setter(false);
+    }
+  };
+
   const combinedRooms = [
     ...invitations,
     ...activeRooms.filter(ar => !invitations.some(inv => inv.roomId === ar.id)) 
   ];
 
-  // [추가] 나에게 온 새로운 친구 요청이 있는지 확인
   const receivedRequestsCount = Object.values(friendStatuses).filter(data => (data.status || data) === 'received').length;
   const hasNewFriendRequest = receivedRequestsCount > 0;
 
@@ -202,7 +208,6 @@ export default function HomePage() {
             🏠 {loadingType === 'create' ? '방 만드는 중...' : '초대하고 방 만들기'}
           </button>
 
-          {/* 친구 관리 버튼 수정: 친구 요청이 있을 때 강조 효과 추가 */}
           <button 
             onClick={() => setShowFriendManager(true)} 
             style={{
@@ -216,7 +221,7 @@ export default function HomePage() {
 
         {/* --- 친구 관리창 팝업(모달) --- */}
         {showFriendManager && (
-          <div style={styles.modalOverlay}>
+          <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowFriendManager)}>
             <div style={styles.friendModal}>
               <div style={styles.modalHeader}>
                 <h3 style={styles.panelTitle}>내 친구 관리</h3>
@@ -227,8 +232,8 @@ export default function HomePage() {
                 {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'received').map(([id, data]) => (
                   <div key={id} style={styles.friendItem}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{color: '#f9d423', fontWeight: 'bold', fontSize: 'clamp(0.9rem, 3.5vw, 1.1rem)'}}>🔔 새로운 친구 요청</span>
-                      <span style={{fontSize: 'clamp(0.85rem, 3vw, 1rem)', marginTop: '0.25rem'}}>{data.nickname ? `${data.nickname}님` : `ID: ${id.slice(0, 5)}...`}</span>
+                      <span style={{color: '#f9d423', fontWeight: 'bold', fontSize: 'clamp(1rem, 4vw, 1.25rem)'}}>🔔 새로운 친구 요청</span>
+                      <span style={{fontSize: 'clamp(1rem, 3.5vw, 1.125rem)', marginTop: '0.25rem'}}>{data.nickname ? `${data.nickname}님` : `ID: ${id.slice(0, 5)}...`}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button onClick={() => handleFriendAccept(id)} style={styles.acceptBtn}>수락</button>
@@ -237,14 +242,14 @@ export default function HomePage() {
                   </div>
                 ))}
                 {friends.length === 0 && !Object.values(friendStatuses).some(data => (data.status || data) === 'received' || (data.status || data) === 'sent') ? (
-                  <p style={{color: '#aaa', fontSize: 'clamp(1rem, 4vw, 1.125rem)', textAlign: 'center', padding: '2rem 0'}}>현재 등록된 친구가 없습니다.</p>
+                  <p style={{color: '#aaa', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', textAlign: 'center', padding: '2.5rem 0'}}>현재 등록된 친구가 없습니다.</p>
                 ) : (
                   <>
                     {friends.map(friend => (
                       <div key={friend.id} style={styles.friendItem}>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <span style={{fontSize: 'clamp(1rem, 4vw, 1.125rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
-                          <span style={{color: '#aaa', fontSize: 'clamp(0.8rem, 3vw, 0.9rem)', marginLeft: '0.5rem'}}>✓ 내 친구</span>
+                          <span style={{fontSize: 'clamp(1.1rem, 4vw, 1.3rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
+                          <span style={{color: '#aaa', fontSize: 'clamp(0.9rem, 3vw, 1rem)', marginLeft: '0.75rem'}}>✓ 내 친구</span>
                         </div>
                         <button onClick={() => handleFriendRemove(friend.id, 'remove')} style={styles.deleteBtn}>삭제</button>
                       </div>
@@ -252,8 +257,8 @@ export default function HomePage() {
                     {Object.entries(friendStatuses).filter(([_, data]) => (data.status || data) === 'sent').map(([id, data]) => (
                       <div key={id} style={{...styles.friendItem, opacity: 0.6}}>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{color: '#aaa', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)'}}>요청 대기 중...</span>
-                          <span style={{fontSize: 'clamp(0.75rem, 2.5vw, 0.85rem)', marginTop: '0.25rem'}}>{data.nickname ? `${data.nickname}님에게` : `ID: ${id.slice(0, 5)}`}</span>
+                          <span style={{color: '#aaa', fontSize: 'clamp(1rem, 3.5vw, 1.125rem)'}}>요청 대기 중...</span>
+                          <span style={{fontSize: 'clamp(0.85rem, 3vw, 1rem)', marginTop: '0.25rem'}}>{data.nickname ? `${data.nickname}님에게` : `ID: ${id.slice(0, 5)}`}</span>
                         </div>
                         <button onClick={() => handleFriendRemove(id, 'cancel')} style={styles.cancelReqBtn}>취소</button>
                       </div>
@@ -327,16 +332,16 @@ export default function HomePage() {
 
         {/* --- 초대 모달 --- */}
         {showInviteModal && (
-          <div style={styles.modalOverlay}>
+          <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowInviteModal)}>
             <div style={styles.modal}>
-              <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: 'clamp(1.5rem, 6vw, 1.75rem)'}}>초대할 친구 선택</h2>
-              <p style={{color: '#aaa', marginBottom: '1.25rem', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)'}}>
+              <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: 'clamp(1.75rem, 6vw, 2.2rem)'}}>초대할 친구 선택</h2>
+              <p style={{color: '#aaa', marginBottom: '1.5rem', fontSize: 'clamp(1rem, 3.5vw, 1.2rem)'}}>
                 방에 초대할 친구를 선택하세요. (최대 5명)
               </p>
               
               <div className="custom-scroll" style={styles.inviteFriendList}>
                 {friends.length === 0 ? (
-                  <div style={{textAlign: 'center', color: '#666', padding: '1.25rem 0', fontSize: 'clamp(1rem, 4vw, 1.125rem)'}}>
+                  <div style={{textAlign: 'center', color: '#666', padding: '1.5rem 0', fontSize: 'clamp(1.1rem, 4vw, 1.3rem)'}}>
                     확정된 친구가 없습니다.
                   </div>
                 ) : (
@@ -350,10 +355,10 @@ export default function HomePage() {
                       }}
                       onClick={() => toggleFriendSelect(friend.id)}
                     >
-                      <span style={{fontSize: 'clamp(1rem, 4vw, 1.125rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
+                      <span style={{fontSize: 'clamp(1.1rem, 4vw, 1.3rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
                       <div style={{
-                        width: '1.5rem', height: '1.5rem', borderRadius: '50%', border: '2px solid #fff',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
+                        width: '1.75rem', height: '1.75rem', borderRadius: '50%', border: '2px solid #fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem',
                         background: selectedFriends.includes(friend.id) ? '#e94560' : 'transparent'
                       }}>
                         {selectedFriends.includes(friend.id) && '✓'}
@@ -363,7 +368,7 @@ export default function HomePage() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
                 <button onClick={() => setShowInviteModal(false)} style={styles.cancelBtn}>
                   취소
                 </button>
@@ -390,21 +395,24 @@ const styles = {
   
   mainButtons: { display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' },
   randomBtn: { padding: 'clamp(1.5rem, 6vw, 2rem)', borderRadius: '1.5rem', border: 'none', background: 'linear-gradient(45deg, #e94560, #ff4b2b)', color: '#fff', fontSize: 'clamp(1.5rem, 6vw, 1.75rem)', fontWeight: 'bold', cursor: 'pointer' },
-  createBtn: { width: '100%', padding: 'clamp(1rem, 4vw, 1.25rem)', borderRadius: '1.25rem', border: 'none', background: '#4a4e69', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.4rem)', fontWeight: 'bold', cursor: 'pointer', boxSizing: 'border-box', transition: '0.2s ease' },
-  friendSingBtn: { padding: 'clamp(1rem, 4vw, 1.25rem)', borderRadius: '1.25rem', border: '2px solid #e94560', background: 'transparent', color: '#e94560', fontSize: 'clamp(1.2rem, 5vw, 1.4rem)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease' },
+  createBtn: { width: '100%', padding: 'clamp(1.25rem, 5vw, 1.5rem)', borderRadius: '1.25rem', border: 'none', background: '#4a4e69', color: '#fff', fontSize: 'clamp(1.3rem, 5.5vw, 1.5rem)', fontWeight: 'bold', cursor: 'pointer', boxSizing: 'border-box', transition: '0.2s ease' },
+  friendSingBtn: { padding: 'clamp(1.25rem, 5vw, 1.5rem)', borderRadius: '1.25rem', border: '2px solid #e94560', background: 'transparent', color: '#e94560', fontSize: 'clamp(1.3rem, 5.5vw, 1.5rem)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease' },
   
-  // 친구 관리 모달 스타일 적용
-  friendModal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '32rem', border: '1px solid #333', boxSizing: 'border-box', position: 'relative' },
+  // 친구 관리 모달 및 초대 모달: 최대 크기와 내부 글씨 크기 확장
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem', cursor: 'pointer' }, // 오버레이 클릭 가능하도록
+  friendModal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '36rem', border: '1px solid #333', boxSizing: 'border-box', position: 'relative', cursor: 'default' }, // 내부 요소 클릭 시 이벤트 전파 방지
+  modal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '32rem', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
+  
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #333', paddingBottom: '1rem' },
-  panelTitle: { margin: 0, color: '#e94560', fontSize: 'clamp(1.2rem, 5vw, 1.4rem)' },
-  closeBtn: { background: 'transparent', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' },
+  panelTitle: { margin: 0, color: '#e94560', fontSize: 'clamp(1.4rem, 6vw, 1.8rem)' },
+  closeBtn: { background: 'transparent', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer', padding: '0.5rem' },
   
-  friendList: { display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '50vh', overflowY: 'auto', paddingRight: '0.5rem' },
-  friendItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '1rem' },
-  acceptBtn: { padding: '0.5rem 0.75rem', background: '#f9d423', color: '#1a1a2e', border: 'none', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.85rem, 3vw, 1rem)' },
-  denyBtn: { padding: '0.5rem 0.75rem', background: '#444', color: '#fff', border: 'none', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.85rem, 3vw, 1rem)' },
-  deleteBtn: { padding: '0.4rem 0.75rem', background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.8rem, 3vw, 0.9rem)' },
-  cancelReqBtn: { padding: '0.4rem 0.75rem', background: 'transparent', color: '#aaa', border: '1px solid #aaa', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.8rem, 3vw, 0.9rem)' },
+  friendList: { display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '50vh', overflowY: 'auto', paddingRight: '0.5rem' },
+  friendItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem', background: 'rgba(255,255,255,0.05)', borderRadius: '1rem' },
+  acceptBtn: { padding: '0.6rem 1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.95rem, 3.5vw, 1.1rem)' },
+  denyBtn: { padding: '0.6rem 1rem', background: '#444', color: '#fff', border: 'none', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.95rem, 3.5vw, 1.1rem)' },
+  deleteBtn: { padding: '0.5rem 1rem', background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
+  cancelReqBtn: { padding: '0.5rem 1rem', background: 'transparent', color: '#aaa', border: '1px solid #aaa', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
   
   roomSection: { marginBottom: '2.5rem' },
   sectionTitle: { margin: '0 0 1rem', fontSize: 'clamp(1.2rem, 5vw, 1.4rem)', fontWeight: 800, color: '#e94560' },
@@ -424,10 +432,8 @@ const styles = {
   joinBtn: { padding: '0 1.5rem', borderRadius: '1rem', border: 'none', background: '#e94560', color: '#fff', fontWeight: 'bold', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', whiteSpace: 'nowrap' },
   error: { color: '#ff6b6b', textAlign: 'center', marginTop: '0.75rem', fontSize: 'clamp(1rem, 4vw, 1.125rem)', fontWeight: 'bold' },
   
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' },
-  modal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2rem)', borderRadius: '1.25rem', width: '100%', maxWidth: '28rem', border: '1px solid #333', boxSizing: 'border-box' },
-  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '40vh', overflowY: 'auto', marginBottom: '1.25rem', paddingRight: '0.5rem' },
-  inviteItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', borderRadius: '1rem', cursor: 'pointer', transition: 'all 0.2s ease' },
-  cancelBtn: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#444', color: '#fff', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)', fontWeight: 'bold', cursor: 'pointer' },
-  confirmBtn: { flex: 2, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }
+  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto', marginBottom: '1.5rem', paddingRight: '0.5rem' },
+  inviteItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem', borderRadius: '1rem', cursor: 'pointer', transition: 'all 0.2s ease' },
+  cancelBtn: { flex: 1, padding: '1.25rem', borderRadius: '1rem', border: 'none', background: '#444', color: '#fff', fontSize: 'clamp(1rem, 4vw, 1.2rem)', fontWeight: 'bold', cursor: 'pointer' },
+  confirmBtn: { flex: 2, padding: '1.25rem', borderRadius: '1rem', border: 'none', background: '#e94560', color: '#fff', fontSize: 'clamp(1rem, 4vw, 1.2rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }
 };
