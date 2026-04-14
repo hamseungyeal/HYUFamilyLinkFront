@@ -27,19 +27,28 @@ export function useVoice() {
       }
     });
 
-    // 2. BackServer에서 Agora 토큰 발급
-    const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
+    try {
+      // 2. BackServer에서 Agora 토큰 발급
+      const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
+      console.log('[Agora] joining channel:', String(roomId), 'uid:', uid);
 
-    // 3. 채널 입장
-    await client.join(APP_ID, String(roomId), token, uid);
+      // 3. 채널 입장
+      await client.join(APP_ID, String(roomId), token, uid);
+      console.log('[Agora] joined successfully');
 
-    // 5. 마이크 트랙 생성 및 발행
-    const localTrack = await AgoraRTC.createMicrophoneAudioTrack();
-    localTrackRef.current = localTrack;
-    await client.publish(localTrack);
+      // 4. 마이크 트랙 생성 및 발행
+      const localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      localTrackRef.current = localTrack;
+      await client.publish(localTrack);
+      console.log('[Agora] published local track');
 
-    setConnected(true);
-    setMuted(false);
+      setConnected(true);
+      setMuted(false);
+    } catch (err) {
+      console.error('[Agora] start failed:', err);
+      clientRef.current = null;
+      throw err;
+    }
   }
 
   function toggleMute() {
