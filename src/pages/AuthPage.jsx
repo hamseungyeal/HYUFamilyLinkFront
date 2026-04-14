@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -15,7 +14,7 @@ export default function AuthPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const navigate = useNavigate();
 
-  // 음성 인식 설정 (Web Speech API)
+  // 음성 인식 설정 (Web Speech API) - 방 페이지 이식 예정 기능
   const handleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -44,40 +43,39 @@ export default function AuthPage() {
     setBirthdate((prev) => prev.slice(0, -1));
   };
 
-  // AuthPage.jsx의 handleSubmit 함수 내부 수정
-async function handleSubmit(e) {
-  if (e) e.preventDefault();
-  if (birthdate.length !== 4) {
-    setError('생년월일 4자리를 모두 눌러주세요.');
-    return;
-  }
-
-  setError('');
-  setLoading(true);
-  try {
-    const payload = { 
-      name, 
-      password: birthdate, 
-      role: 'phone' 
-    };
-
-    let data;
-    // 로그인과 회원가입 모두 동일한 payload 형식을 사용합니다.
-    if (mode === 'login') {
-      data = await api.post('/api/auth/login', payload);
-    } else {
-      data = await api.post('/api/auth/register', payload);
+  async function handleSubmit(e) {
+    if (e) e.preventDefault();
+    if (birthdate.length !== 4) {
+      setError('생년월일 4자리를 모두 눌러주세요.');
+      return;
     }
 
-    setAuth(data.user, data.token);
-    navigate('/');
-  } catch (err) {
-    console.error(err);
-    setError(err.response?.data?.error || '접속에 실패했습니다.');
-  } finally {
-    setLoading(false);
+    setError('');
+    setLoading(true);
+    try {
+      const payload = { 
+        name, 
+        password: birthdate, 
+        role: 'phone' 
+      };
+
+      let data;
+      // 로그인과 회원가입 모두 동일한 payload 형식을 사용합니다.
+      if (mode === 'login') {
+        data = await api.post('/api/auth/login', payload);
+      } else {
+        data = await api.post('/api/auth/register', payload);
+      }
+
+      setAuth(data.user, data.token);
+      navigate('/');
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.error || '접속에 실패했습니다.');
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   return (
     <div style={styles.container}>
@@ -155,37 +153,51 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     background: '#1a1a2e',
-    padding: '20px',
+    // 수정: % 대신 clamp를 사용하여 너무 커지거나 작아지지 않게 방어
+    padding: 'clamp(1rem, 5vw, 2rem)', 
+    boxSizing: 'border-box',
   },
   card: {
     background: 'rgba(255,255,255,0.05)',
     backdropFilter: 'blur(10px)',
-    borderRadius: 30,
-    padding: '30px',
+    borderRadius: '1.5rem',
+    // 수정: 카드 내부 패딩이 무한정 넓어져서 콘텐츠 영역을 침범하지 않도록 상한선(2.5rem) 설정
+    padding: 'clamp(1.5rem, 5vw, 2.5rem)', 
     width: '100%',
-    maxWidth: 500,
+    maxWidth: '32rem', 
     color: '#fff',
     border: '1px solid rgba(255,255,255,0.1)',
+    boxSizing: 'border-box',
   },
-  title: { margin: '0 0 10px', fontSize: 36, textAlign: 'center', fontWeight: 'bold' },
-  subtitle: { margin: '0 0 30px', textAlign: 'center', color: '#ccc', fontSize: 20 },
-  tabRow: { display: 'flex', marginBottom: 30, borderRadius: 15, overflow: 'hidden', border: '2px solid #e94560' },
-  tab: { flex: 1, padding: '15px 0', border: 'none', cursor: 'pointer', fontSize: 22, fontWeight: 'bold', transition: '0.3s' },
-  inputSection: { marginBottom: 30 },
-  label: { display: 'block', marginBottom: 12, fontSize: 24, fontWeight: '600', color: '#e94560' },
-  voiceRow: { display: 'flex', gap: 10 },
+  title: { margin: '0 0 0.5rem', fontSize: 'clamp(1.5rem, 6vw, 2.25rem)', textAlign: 'center', fontWeight: 'bold' },
+  subtitle: { margin: '0 0 2rem', textAlign: 'center', color: '#ccc', fontSize: 'clamp(1rem, 4vw, 1.25rem)' },
+  
+  tabRow: { display: 'flex', marginBottom: '2rem', borderRadius: '1rem', overflow: 'hidden', border: '2px solid #e94560' },
+  tab: { flex: 1, padding: '1rem 0', border: 'none', cursor: 'pointer', fontSize: 'clamp(1.1rem, 4vw, 1.375rem)', fontWeight: 'bold', transition: '0.3s' },
+  
+  inputSection: { marginBottom: '2rem' },
+  label: { display: 'block', marginBottom: '0.75rem', fontSize: 'clamp(1.2rem, 4.5vw, 1.5rem)', fontWeight: '600', color: '#e94560' },
+  voiceRow: { display: 'flex', gap: '0.5rem', width: '100%' },
   largeInput: {
-    flex: 1, padding: '15px', borderRadius: 12, border: 'none',
-    background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 24, outline: 'none',
+    flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none',
+    background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 'clamp(1.2rem, 4.5vw, 1.5rem)', outline: 'none',
+    boxSizing: 'border-box', minWidth: 0 
   },
-  voiceBtn: { padding: '0 20px', borderRadius: 12, border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer', fontWeight: 'bold' },
-  pinDisplay: { display: 'flex', justifyContent: 'center', gap: 20, marginBottom: 20, fontSize: 30, color: '#e94560' },
-  pinDot: { width: 40, textAlign: 'center' },
-  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
+  voiceBtn: { 
+    padding: '0 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', 
+    fontSize: 'clamp(1rem, 3.5vw, 1.125rem)', cursor: 'pointer', fontWeight: 'bold', 
+    whiteSpace: 'nowrap' 
+  },
+  
+  pinDisplay: { display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '1.25rem', fontSize: '2rem', color: '#e94560' },
+  pinDot: { width: '2.5rem', textAlign: 'center' },
+  
+  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' },
   keyBtn: {
-    padding: '20px', borderRadius: 15, border: 'none', color: '#fff', 
-    fontSize: 26, fontWeight: 'bold', cursor: 'pointer', transition: '0.2s active',
+    padding: '1.25rem 0', borderRadius: '1rem', border: 'none', color: '#fff', 
+    fontSize: 'clamp(1.2rem, 4.5vw, 1.6rem)', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s active',
   },
-  error: { color: '#ff6b6b', fontSize: 18, textAlign: 'center', marginTop: 20, fontWeight: 'bold' },
-  loading: { textAlign: 'center', marginTop: 20, fontSize: 20, color: '#aaa' }
+  
+  error: { color: '#ff6b6b', fontSize: '1.125rem', textAlign: 'center', marginTop: '1.25rem', fontWeight: 'bold' },
+  loading: { textAlign: 'center', marginTop: '1.25rem', fontSize: '1.25rem', color: '#aaa' }
 };

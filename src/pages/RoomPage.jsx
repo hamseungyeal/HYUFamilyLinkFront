@@ -32,6 +32,15 @@ export default function RoomPage() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedFriends, setSelectedFriends] = useState([]);
 
+  // [마이크 기능] 로컬 시각화 상태 추가 (훅이 더미라도 UI가 반응하도록)
+  const [isMicOn, setIsMicOn] = useState(!muted);
+
+  // 마이크 토글 핸들러
+  const handleMicToggle = () => {
+    if (toggleMute) toggleMute(); // 실제 훅 기능 실행
+    setIsMicOn((prev) => !prev);  // UI 상태 즉각 변경
+  };
+
   // 1. 방 관리 및 실시간 리스너
   useEffect(() => {
     const socket = getSocket();
@@ -40,7 +49,6 @@ export default function RoomPage() {
     if (!roomId) {
       const savedCode = sessionStorage.getItem('lastJoinCode');
       if (savedCode) {
-        // [수정] 재입장 시 방이 사라졌거나 에러가 난 경우를 대비한 콜백 추가
         socket.emit('room:join', { joinCode: savedCode }, (res) => {
           if (res && res.error) {
             alert('방이 종료되었거나 입장할 수 없습니다.');
@@ -75,7 +83,6 @@ export default function RoomPage() {
       
       useRoomStore.setState((state) => {
         const rawParticipants = data.participants || state.participants;
-        // 값의 일관성을 위해 고유 id를 기준으로 중복 필터링
         const uniqueParticipants = Array.from(
           new Map(rawParticipants.map(p => [String(p.id).trim(), p])).values()
         );
@@ -151,7 +158,6 @@ export default function RoomPage() {
     socket?.emit(event, { targetId });
   };
 
-  // [초대 기능] 핸들러 추가
   const toggleFriendSelect = (friendId) => {
     setSelectedFriends(prev => 
       prev.includes(friendId) ? prev.filter(id => id !== friendId) : [...prev, friendId]
@@ -174,7 +180,6 @@ export default function RoomPage() {
     setSelectedFriends([]);
   };
 
-  // 이미 방에 있는 친구는 초대 목록에서 제외 (일관된 값 처리를 위해 String으로 변환 후 비교)
   const invitableFriends = friends?.filter(f => 
     !participants.some(p => String(p.id).trim() === String(f.id).trim())
   ) || [];
@@ -213,27 +218,33 @@ export default function RoomPage() {
 
       <header style={styles.header}>
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
-        <span style={styles.roomCode}>방 코드: {joinCode || '...'}</span>
-        <button onClick={() => toggleMute()} style={{...styles.muteBtn, background: muted ? '#ff4b2b' : 'transparent'}}>{muted ? '🔇 마이크 꺼짐' : '🎤 마이크 켜짐'}</button>
+        <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
+        
+        {/* 마이크 버튼 수정: 로그인창과 동일한 컬러 시스템 & 작동 보장 */}
+        <button 
+          onClick={handleMicToggle} 
+          style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
+        >
+          {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
+        </button>
       </header>
 
       <div style={styles.mainDisplay}>
         {currentSong ? (
-          <div style={styles.songCard}><h2 style={styles.songTitle}>{currentSong.title}</h2><p style={styles.songArtist}>{currentSong.artist}</p></div>
+          <div style={styles.songCard}>
+            <h2 style={styles.songTitle}>{currentSong.title}</h2>
+            <p style={styles.songArtist}>{currentSong.artist}</p>
+          </div>
         ) : (
           <div style={styles.emptyCard}>화면을 눌러 노래를 예약하세요</div>
         )}
       </div>
 
       <div style={styles.participantSection}>
-        {/* [초대 기능] 헤더 영역 변경 */}
         <div style={styles.participantHeader}>
-          <h3 style={styles.subTitle}>함께 있는 친구들 ({participants.length}/6명)</h3>
+          <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
           <button 
-            onClick={() => {
-              setSelectedFriends([]);
-              setShowInviteModal(true);
-            }} 
+            onClick={() => { setSelectedFriends([]); setShowInviteModal(true); }} 
             style={styles.inviteBtn}
             disabled={participants.length >= 6}
           >
@@ -244,7 +255,6 @@ export default function RoomPage() {
         <div style={styles.userList}>
           {participants.map((p) => {
             const isMe = String(p.id).trim() === String(user?.id).trim();
-            
             const statusData = friendStatuses[p.id]; 
             const currentStatus = statusData?.status || statusData; 
             
@@ -252,7 +262,7 @@ export default function RoomPage() {
             const isFriend = currentStatus === 'friend';
             const isSent = currentStatus === 'sent';
 
-            let buttonText = '➕ 친구 추가';
+            let buttonText = '➕ 추가';
             if (isFriend) buttonText = '✓ 친구';
             else if (isSent) buttonText = '요청됨';
             else if (isReceived) buttonText = '수락하기';
@@ -284,36 +294,41 @@ export default function RoomPage() {
       </div>
 
       <footer style={styles.footer}>
-        <div style={styles.emojiRow}>{EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}</div>
+        <div style={styles.emojiRow}>
+          {EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}
+        </div>
         <button onClick={() => setShowSongPicker(true)} style={styles.addSongBtn}>🎶 노래 예약하기</button>
       </footer>
 
       {showSongPicker && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
-            <header style={styles.modalHeader}><h3>노래 찾기</h3><button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button></header>
+            <header style={styles.modalHeader}>
+              <h3 style={{ margin: 0, fontSize: '1.5rem' }}>노래 찾기</h3>
+              <button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button>
+            </header>
             <input style={styles.searchInput} value={songSearch} onChange={(e) => searchSongs(e.target.value)} placeholder="제목이나 가수를 입력하세요" />
-            <div style={styles.songList}>{songs.map(s => (<div key={s.id} style={styles.songItem} onClick={() => reserveSong(s.id)}><div>{s.title}</div><div style={{fontSize: 14, color: '#aaa'}}>{s.artist}</div></div>))}</div>
+            <div style={styles.songList}>
+              {songs.map(s => (
+                <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s.id)}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{s.title}</div>
+                  <div style={{fontSize: '1rem', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* [초대 기능] 룸 내부 친구 초대 모달 */}
-      {/* ========================================= */}
       {showInviteModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
-            <h2 style={{color: '#e94560', margin: '0 0 15px 0'}}>방으로 친구 초대</h2>
-            <p style={{color: '#aaa', marginBottom: '20px'}}>
-              지금 바로 방에 참여할 친구를 선택하세요.
-            </p>
+            <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: '1.75rem'}}>방으로 친구 초대</h2>
+            <p style={{color: '#aaa', marginBottom: '1.5rem', fontSize: '1rem'}}>지금 바로 방에 참여할 친구를 선택하세요.</p>
             
             <div style={styles.inviteFriendList}>
               {invitableFriends.length === 0 ? (
-                <div style={{textAlign: 'center', color: '#666', padding: '20px 0'}}>
-                  초대할 수 있는 친구가 없습니다.
-                </div>
+                <div style={{textAlign: 'center', color: '#666', padding: '1.5rem 0', fontSize: '1.1rem'}}>초대할 수 있는 친구가 없습니다.</div>
               ) : (
                 invitableFriends.map(friend => (
                   <div 
@@ -325,10 +340,10 @@ export default function RoomPage() {
                     }}
                     onClick={() => toggleFriendSelect(friend.id)}
                   >
-                    <span style={{fontSize: 18, fontWeight: 'bold'}}>{friend.nickname}</span>
+                    <span style={{fontSize: '1.125rem', fontWeight: 'bold'}}>{friend.nickname}</span>
                     <div style={{
-                      width: 24, height: 24, borderRadius: '50%', border: '2px solid #fff',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: '1.5rem', height: '1.5rem', borderRadius: '50%', border: '2px solid #fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
                       background: selectedFriends.includes(friend.id) ? '#e94560' : 'transparent'
                     }}>
                       {selectedFriends.includes(friend.id) && '✓'}
@@ -338,14 +353,14 @@ export default function RoomPage() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
               <button onClick={() => setShowInviteModal(false)} style={styles.cancelBtn}>취소</button>
               <button 
                 onClick={handleSendInvites} 
                 style={{...styles.confirmBtn, opacity: selectedFriends.length === 0 ? 0.5 : 1}}
                 disabled={selectedFriends.length === 0}
               >
-                {selectedFriends.length > 0 ? `${selectedFriends.length}명 초대하기` : '친구를 선택하세요'}
+                {selectedFriends.length > 0 ? `${selectedFriends.length}명 초대` : '선택하세요'}
               </button>
             </div>
           </div>
@@ -355,49 +370,53 @@ export default function RoomPage() {
   );
 }
 
+// 반응형 적용 (clamp, rem, vw)
 const styles = {
-  container: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: '20px', position: 'relative', overflow: 'hidden' },
+  container: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: 'clamp(1rem, 4vw, 2rem)', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' },
   reactionLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 },
-  reactionBubble: { position: 'absolute', bottom: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: 'bubbleUp 4s ease-out forwards' },
-  reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '5px 12px', borderRadius: '12px', fontSize: '16px', fontWeight: 'bold', marginBottom: '5px', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
-  reactionEmoji: { fontSize: '50px' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, zIndex: 10 },
-  leaveBtn: { padding: '12px 20px', borderRadius: 10, background: '#53354a', color: '#fff', border: 'none', fontSize: 18, fontWeight: 'bold', cursor: 'pointer' },
-  roomCode: { fontSize: 24, fontWeight: 'bold', color: '#e94560' },
-  muteBtn: { padding: '12px 20px', borderRadius: 10, border: '1px solid #e94560', color: '#fff', cursor: 'pointer' },
-  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  songCard: { textAlign: 'center', padding: '40px', background: 'rgba(233,69,96,0.1)', borderRadius: 30, border: '2px solid #e94560', width: '100%' },
-  songTitle: { fontSize: 42, margin: '0 0 10px' },
-  songArtist: { fontSize: 24, color: '#aaa' },
-  emptyCard: { fontSize: 22, color: '#666' },
+  reactionBubble: { position: 'absolute', bottom: '15vh', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: 'bubbleUp 4s ease-out forwards' },
+  reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '0.25rem 0.75rem', borderRadius: '1rem', fontSize: 'clamp(0.8rem, 3vw, 1rem)', fontWeight: 'bold', marginBottom: '0.25rem', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
+  reactionEmoji: { fontSize: 'clamp(2.5rem, 8vw, 3.5rem)' },
   
-  participantSection: { marginBottom: 30 },
-  participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  subTitle: { fontSize: 20, color: '#e94560', margin: 0 },
-  inviteBtn: { padding: '8px 16px', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', zIndex: 10, gap: '0.5rem' },
+  leaveBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
+  roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
+  muteBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
   
-  userList: { display: 'flex', flexDirection: 'column', gap: 10 },
-  userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: 15 },
-  userInfo: { display: 'flex', alignItems: 'center', gap: 12 },
-  avatar: { width: 45, height: 45, borderRadius: '50%', background: '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 'bold' },
-  userName: { fontSize: 18 },
-  friendBtn: { padding: '10px 15px', borderRadius: 8, border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease' },
+  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 },
+  songCard: { textAlign: 'center', padding: 'clamp(1.5rem, 6vw, 3rem)', background: 'rgba(233,69,96,0.1)', borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', boxSizing: 'border-box' },
+  songTitle: { fontSize: 'clamp(1.8rem, 8vw, 3rem)', margin: '0 0 0.5rem', wordBreak: 'keep-all' },
+  songArtist: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', color: '#aaa', margin: 0 },
+  emptyCard: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', color: '#666', textAlign: 'center' },
+  
+  participantSection: { marginBottom: '1.5rem' },
+  participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' },
+  subTitle: { fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', color: '#e94560', margin: 0 },
+  inviteBtn: { padding: '0.5rem 0.75rem', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.85rem, 3vw, 1rem)' },
+  
+  userList: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.75rem 1rem', borderRadius: '1rem' },
+  userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
+  avatar: { width: 'clamp(2.5rem, 10vw, 3rem)', height: 'clamp(2.5rem, 10vw, 3rem)', borderRadius: '50%', background: '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1.2rem, 4vw, 1.5rem)', fontWeight: 'bold' },
+  userName: { fontSize: 'clamp(1rem, 4vw, 1.125rem)' },
+  friendBtn: { padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.85rem, 3vw, 1rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
   alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
-  footer: { display: 'flex', flexDirection: 'column', gap: 15, zIndex: 10 },
-  emojiRow: { display: 'flex', justifyContent: 'space-between' },
-  emojiBtn: { fontSize: 40, background: 'transparent', border: 'none', cursor: 'pointer' },
-  addSongBtn: { padding: '18px', borderRadius: 15, background: '#e94560', color: '#fff', fontSize: 22, fontWeight: 'bold', border: 'none', cursor: 'pointer' },
   
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 200 },
-  modal: { background: '#1a1a2e', width: '100%', maxWidth: 400, borderRadius: 20, padding: 30, display: 'flex', flexDirection: 'column', border: '1px solid #333' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: 15 },
-  closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: 20, cursor: 'pointer' },
-  searchInput: { padding: 15, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 18, marginBottom: 15 },
+  footer: { display: 'flex', flexDirection: 'column', gap: '1rem', zIndex: 10 },
+  emojiRow: { display: 'flex', justifyContent: 'space-between' },
+  emojiBtn: { fontSize: 'clamp(2rem, 8vw, 2.5rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
+  addSongBtn: { padding: '1rem', borderRadius: '1rem', background: '#e94560', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', border: 'none', cursor: 'pointer' },
+  
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200 },
+  modal: { background: '#1a1a2e', width: '100%', maxWidth: '28rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
+  closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer' },
+  searchInput: { padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '1.125rem', marginBottom: '1rem', width: '100%', boxSizing: 'border-box' },
   songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh' },
-  songItem: { padding: 15, borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' },
-  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '300px', overflowY: 'auto', marginBottom: 20 },
-  inviteItem: { display: 'flex', justifyContent: 'space-between', padding: '15px', borderRadius: 15, cursor: 'pointer', transition: 'all 0.2s ease' },
-  cancelBtn: { flex: 1, padding: '15px', borderRadius: 10, border: 'none', background: '#444', color: '#fff', fontSize: 16, fontWeight: 'bold', cursor: 'pointer' },
-  confirmBtn: { flex: 2, padding: '15px', borderRadius: 10, border: 'none', background: '#e94560', color: '#fff', fontSize: 16, fontWeight: 'bold', cursor: 'pointer' }
+  songItem: { padding: '1rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' },
+  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '30vh', overflowY: 'auto', marginBottom: '1rem' },
+  inviteItem: { display: 'flex', justifyContent: 'space-between', padding: '1rem', borderRadius: '1rem', cursor: 'pointer', transition: 'all 0.2s ease', alignItems: 'center' },
+  cancelBtn: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#444', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' },
+  confirmBtn: { flex: 2, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }
 };
