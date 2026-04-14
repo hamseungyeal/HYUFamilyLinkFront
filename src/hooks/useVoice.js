@@ -24,8 +24,10 @@ export function useVoice() {
 
     // 3. 다른 사용자 음성 자동 구독
     client.on('user-published', async (remoteUser, mediaType) => {
+      console.log('[Agora] user-published:', remoteUser.uid, mediaType);
       await client.subscribe(remoteUser, mediaType);
       if (mediaType === 'audio') {
+        console.log('[Agora] playing remote audio from:', remoteUser.uid);
         remoteUser.audioTrack.play();
       }
     });
