@@ -98,7 +98,7 @@ export default function HomePage() {
   useEffect(() => {
     fetchActiveRooms();
     refreshFriends();
-    const timer = setInterval(fetchActiveRooms, 1000);
+    const timer = setInterval(fetchActiveRooms, 5000);
     return () => clearInterval(timer);
   }, [fetchActiveRooms, refreshFriends]);
 
