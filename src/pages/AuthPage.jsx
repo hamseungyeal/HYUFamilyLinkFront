@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
@@ -71,7 +71,7 @@ export default function AuthPage() {
       navigate('/');
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.error || '접속에 실패했습니다.');
+      setError(err.message || '접속에 실패했습니다.');
     } finally {
       setLoading(false);
     }
