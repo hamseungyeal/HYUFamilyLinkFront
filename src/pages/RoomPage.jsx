@@ -49,15 +49,23 @@ export default function RoomPage() {
     if (!roomId) {
       const savedCode = sessionStorage.getItem('lastJoinCode');
       if (savedCode) {
-        socket.emit('room:join', { joinCode: savedCode }, (res) => {
+        socket.emit('room:join', { joinCode: savedCode }, async (res) => {
           if (res && res.error) {
             alert('방이 종료되었거나 입장할 수 없습니다.');
             sessionStorage.removeItem('lastJoinCode');
             useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null });
             navigate('/', { replace: true });
+          } else if (res && res.roomId) {
+            try {
+              await start(res.roomId);
+              await refreshFriends();
+            } catch (err) {
+              // Agora 오류는 무시하고 방은 유지
+            }
+            setIsInitialLoading(false);
           }
         });
-        return; 
+        return;
       } else {
         navigate('/', { replace: true });
         return;
