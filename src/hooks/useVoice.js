@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 import { api } from '../api/client';
 
@@ -11,7 +11,7 @@ export function useVoice() {
   const [connected, setConnected] = useState(false);
   const [muted,     setMuted]     = useState(false);
 
-  async function start(roomId) {
+  const start = useCallback(async (roomId) => {
     // 이미 연결된 상태면 무시 (레이스 컨디션 방지: 비동기 전에 즉시 설정)
     if (clientRef.current) return;
     const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
@@ -46,6 +46,7 @@ export function useVoice() {
 
     try {
       // 2. BackServer에서 Agora 토큰 발급
+      console.log('[Agora] fetching token for roomId:', roomId);
       const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
       console.log('[Agora] joining channel:', String(roomId), 'uid:', uid);
 
@@ -66,9 +67,9 @@ export function useVoice() {
       clientRef.current = null;
       throw err;
     }
-  }
+  }, []);
 
-  function toggleMute() {
+  const toggleMute = useCallback(() => {
     const track = localTrackRef.current;
     if (!track) return;
     if (muted) {
@@ -77,16 +78,16 @@ export function useVoice() {
       track.setEnabled(false);
     }
     setMuted((m) => !m);
-  }
+  }, [muted]);
 
-  async function stop() {
+  const stop = useCallback(async () => {
     localTrackRef.current?.close();
     localTrackRef.current = null;
     await clientRef.current?.leave();
     clientRef.current = null;
     setConnected(false);
     setMuted(false);
-  }
+  }, []);
 
   return { start, stop, toggleMute, connected, muted };
 }
