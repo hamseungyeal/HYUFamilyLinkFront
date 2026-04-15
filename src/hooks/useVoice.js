@@ -17,6 +17,23 @@ export function useVoice() {
     const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
     clientRef.current = client;
 
+    // 모바일 autoplay 차단 시 사용자에게 탭 유도
+    AgoraRTC.onAutoplayFailed = () => {
+      const btn = document.createElement('button');
+      btn.innerText = '🔊 소리를 켜려면 탭하세요';
+      Object.assign(btn.style, {
+        position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+        zIndex: 9999, padding: '12px 24px', borderRadius: '24px',
+        background: '#e94560', color: '#fff', border: 'none', fontSize: '15px',
+        cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+      });
+      btn.onclick = () => {
+        client.remoteUsers.forEach((u) => u.audioTrack?.play());
+        btn.remove();
+      };
+      document.body.appendChild(btn);
+    };
+
     // 1. 다른 사용자 음성 자동 구독 (join 전에 등록해야 함)
     client.on('user-published', async (remoteUser, mediaType) => {
       console.log('[Agora] user-published:', remoteUser.uid, mediaType);
@@ -45,7 +62,7 @@ export function useVoice() {
       setConnected(true);
       setMuted(false);
     } catch (err) {
-      console.error('[Agora] start failed:', err);
+      console.error('[Agora] start failed - name:', err.name, '/ message:', err.message, '/ code:', err.code);
       clientRef.current = null;
       throw err;
     }
