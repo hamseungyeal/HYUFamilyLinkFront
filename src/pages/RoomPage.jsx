@@ -78,7 +78,6 @@ export default function RoomPage() {
         try {
           await start(roomId);
           await refreshFriends(); 
-          setIsInitialLoading(false);
         } catch (err) {
           setIsInitialLoading(false);
         }
@@ -161,16 +160,29 @@ export default function RoomPage() {
   }, [roomId, joinCode, navigate, start, refreshFriends]);
 
   const handleLeave = async () => {
-    if (isLeaving.current) return;
-    isLeaving.current = true; 
-    const socket = getSocket();
-    socket?.off('room:state');
-    socket?.off('friend:update');
-    sessionStorage.removeItem('lastJoinCode');
-    useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
-    navigate('/', { replace: true });
-    try { socket?.emit('room:leave'); await stop(); } catch (err) {}
-  };
+  if (isLeaving.current) return;
+  isLeaving.current = true; 
+
+  const socket = getSocket();
+  
+  socket?.off('room:state');
+  
+  sessionStorage.removeItem('lastJoinCode');
+  useRoomStore.setState({ 
+    roomId: null, 
+    joinCode: null, 
+    participants: [], 
+    currentSong: null, 
+    currentTurnId: null 
+  });
+
+  navigate('/', { replace: true });
+
+  try { 
+    socket?.emit('room:leave'); 
+    await stop(); 
+  } catch (err) {}
+};
 
   const handleFriendAction = (targetId) => {
     const socket = getSocket();
@@ -300,6 +312,7 @@ export default function RoomPage() {
                 height: '250', 
                 playerVars: { autoplay: 1, controls: 1 } 
               }}
+              host="https://www.youtube-nocookie.com"
               onStateChange={onPlayerStateChange} 
             />
             <h2 style={{...styles.songTitle, marginTop: '10px'}}>{playingVideo.title}</h2>
