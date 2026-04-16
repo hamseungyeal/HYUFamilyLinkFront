@@ -59,7 +59,8 @@ export default function HomePage() {
           roomId: data.roomId,
           joinCode: data.joinCode,
           participants: uniqueParticipants,
-          currentSong: data.currentSong || null
+          currentSong: data.currentSong || null,
+          currentTurnId: data.currentTurnId || null
         });
       }
     };

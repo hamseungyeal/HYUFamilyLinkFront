@@ -31,7 +31,7 @@ echo.
 
 :: npm install
 echo [3/3] Installing packages...
-npm install
+npm install react-youtube
 echo.
 
 echo ========================================

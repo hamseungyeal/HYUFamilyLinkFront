@@ -30,7 +30,7 @@ echo ""
 
 # npm install
 echo "[3/3] 패키지 설치 중..."
-npm install
+npm install react-youtube
 echo ""
 
 echo "========================================"

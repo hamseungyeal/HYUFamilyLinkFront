@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
 import { useVoice } from '../hooks/useVoice';
 import { getSocket } from '../hooks/useSocket';
 import { api } from '../api/client';
+import YouTube from 'react-youtube'; 
 
 const EMOJIS = ['🎤', '👏', '🔥', '❤️', '😂', '🎵'];
 
@@ -12,12 +13,11 @@ export default function RoomPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   
-  // [추가] 친구 명단 가져오기 (초대용)
   const friends = useAuthStore((s) => s.friends);
   const friendStatuses = useAuthStore((s) => s.friendStatuses);
   const refreshFriends = useAuthStore((s) => s.refreshFriends);
 
-  const { roomId, joinCode, participants, currentSong } = useRoomStore();
+  const { roomId, joinCode, participants, currentSong, currentTurnId } = useRoomStore();
   const { start, stop, toggleMute, muted } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -28,20 +28,22 @@ export default function RoomPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
 
-  // [초대 기능] 관련 상태 추가
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedFriends, setSelectedFriends] = useState([]);
 
-  // [마이크 기능] 로컬 시각화 상태 추가 (훅이 더미라도 UI가 반응하도록)
   const [isMicOn, setIsMicOn] = useState(!muted);
+  const [playingVideo, setPlayingVideo] = useState(null);
 
-  // 마이크 토글 핸들러
+  // 일관된 값 취급: 엄격한 문자열 및 공백 제거 변환 후 비교
+  const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
+  const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
+
   const handleMicToggle = () => {
-    if (toggleMute) toggleMute(); // 실제 훅 기능 실행
-    setIsMicOn((prev) => !prev);  // UI 상태 즉각 변경
+    if (toggleMute) toggleMute(); 
+    setIsMicOn((prev) => !prev); 
   };
 
-  // 1. 방 관리 및 실시간 리스너
+  // [1] 방 접속 및 새로고침 복구 & 이벤트 리스너 통합 (과거 안정된 코드 기반)
   useEffect(() => {
     const socket = getSocket();
     if (!socket || isLeaving.current) return;
@@ -53,37 +55,36 @@ export default function RoomPage() {
           if (res && res.error) {
             alert('방이 종료되었거나 입장할 수 없습니다.');
             sessionStorage.removeItem('lastJoinCode');
-            useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null });
+            useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
             navigate('/', { replace: true });
           } else if (res && res.roomId) {
+            useRoomStore.setState({ roomId: res.roomId, joinCode: savedCode });
             try {
               await start(res.roomId);
               await refreshFriends();
             } catch (err) {
-              // Agora 오류는 무시하고 방은 유지
+              console.error('Audio/VR Start Error:', err);
             }
             setIsInitialLoading(false);
           }
         });
-        return;
       } else {
         navigate('/', { replace: true });
-        return;
+        return; // [복구] 이전 코드의 return; 위치
       }
+    } else {
+      sessionStorage.setItem('lastJoinCode', joinCode || '');
+      const initData = async () => {
+        try {
+          await start(roomId);
+          await refreshFriends(); 
+          setIsInitialLoading(false);
+        } catch (err) {
+          setIsInitialLoading(false);
+        }
+      };
+      initData();
     }
-
-    sessionStorage.setItem('lastJoinCode', joinCode);
-
-    const initData = async () => {
-      try {
-        await start(roomId);
-        await refreshFriends(); 
-        setIsInitialLoading(false);
-      } catch (err) {
-        setIsInitialLoading(false);
-      }
-    };
-    initData();
 
     const onRoomState = async (data) => {
       if (isLeaving.current) return;
@@ -91,14 +92,18 @@ export default function RoomPage() {
       
       useRoomStore.setState((state) => {
         const rawParticipants = data.participants || state.participants;
+        // 참가자 중복 제거 및 일관된 데이터 구조 유지
         const uniqueParticipants = Array.from(
           new Map(rawParticipants.map(p => [String(p.id).trim(), p])).values()
         );
 
         return {
           ...state,
+          roomId: data.roomId || state.roomId,
           participants: uniqueParticipants,
-          joinCode: data.joinCode || state.joinCode 
+          joinCode: data.joinCode || state.joinCode,
+          // 턴 상태 갱신 누락 방지
+          currentTurnId: data.currentTurnId !== undefined ? data.currentTurnId : state.currentTurnId
         };
       });
     };
@@ -127,14 +132,31 @@ export default function RoomPage() {
       setTimeout(() => setActiveReactions(prev => prev.filter(r => r.id !== rid)), 4000);
     };
 
+    const onSongPlay = (data) => {
+      if (!isLeaving.current) {
+        setPlayingVideo(data);
+        setShowSongPicker(false);
+      }
+    };
+
+    const onSongStop = () => {
+      if (!isLeaving.current) {
+        setPlayingVideo(null);
+      }
+    };
+
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
+    socket.on('song:play', onSongPlay); 
+    socket.on('song:stop', onSongStop); 
 
     return () => { 
       socket.off('room:state', onRoomState);
       socket.off('friend:update', onFriendUpdate); 
       socket.off('user:reaction', onReaction);
+      socket.off('song:play', onSongPlay);
+      socket.off('song:stop', onSongStop);
     };
   }, [roomId, joinCode, navigate, start, refreshFriends]);
 
@@ -145,7 +167,7 @@ export default function RoomPage() {
     socket?.off('room:state');
     socket?.off('friend:update');
     sessionStorage.removeItem('lastJoinCode');
-    useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null });
+    useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
     navigate('/', { replace: true });
     try { socket?.emit('room:leave'); await stop(); } catch (err) {}
   };
@@ -162,7 +184,6 @@ export default function RoomPage() {
         [targetId]: { ...(prev.friendStatuses[targetId] || {}), status: current === 'received' ? 'friend' : 'sent' }
       }
     }));
-
     socket?.emit(event, { targetId });
   };
 
@@ -174,7 +195,6 @@ export default function RoomPage() {
 
   const handleSendInvites = () => {
     if (selectedFriends.length === 0) return;
-    
     getSocket()?.emit('room:send_invites', { 
       invitedFriends: selectedFriends,
       roomId: roomId,
@@ -182,7 +202,6 @@ export default function RoomPage() {
       currentSong: currentSong?.title || '대기 중',
       participantCount: participants.length
     });
-    
     alert('친구를 초대했습니다!');
     setShowInviteModal(false);
     setSelectedFriends([]);
@@ -194,18 +213,47 @@ export default function RoomPage() {
 
   const sendEmoji = (emoji) => { getSocket()?.emit('user:reaction', { emoji }); };
   
-  const searchSongs = async (q) => {
-    setSongSearch(q);
-    if (!q) return;
+  const executeSearch = async () => {
+    if (!songSearch.trim()) return;
     try { 
-      const { data } = await api.get(`/api/songs?q=${encodeURIComponent(q)}`); 
+      const data = await api.get(`/api/songs?q=${encodeURIComponent(songSearch)}`); 
       setSongs(data || []); 
-    } catch {}
+    } catch (err) {
+      console.error("검색 오류:", err);
+    }
   };
   
-  const reserveSong = (songId) => { getSocket()?.emit('queue:add', { songId }); setShowSongPicker(false); setSongSearch(''); };
+  const reserveSong = (song) => { 
+    getSocket()?.emit('song:select', { 
+      videoId: song.video_id || song.id, 
+      title: song.title, 
+      artist: song.artist 
+    }); 
+    setShowSongPicker(false); 
+    setSongSearch(''); 
+    setSongs([]);
+  };
+
+  const handleSkipTurn = () => {
+    getSocket()?.emit('turn:skip');
+    setPlayingVideo(null); // 로컬에서 즉시 영상 제거
+  };
+
+  const onPlayerStateChange = (event) => {
+    // [수정] amISinging 대신 playingVideo.singerId 를 직접 참조 (Stale Closure 완벽 방지)
+    // event.target.getVideoData() 등을 사용할 수도 있으나, playingVideo 상태가 더 확실함.
+    // YT.PlayerState.ENDED == 0
+    if (event.data === 0) {
+      if (playingVideo && String(user?.id).trim() === String(playingVideo.singerId).trim()) {
+        getSocket()?.emit('song:end');
+        setPlayingVideo(null);
+      }
+    }
+  };
 
   if (!roomId && !sessionStorage.getItem('lastJoinCode') && !isLeaving.current) return null;
+
+  const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
   return (
     <div style={styles.container}>
@@ -228,7 +276,6 @@ export default function RoomPage() {
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
         
-        {/* 마이크 버튼 수정: 로그인창과 동일한 컬러 시스템 & 작동 보장 */}
         <button 
           onClick={handleMicToggle} 
           style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
@@ -237,14 +284,34 @@ export default function RoomPage() {
         </button>
       </header>
 
+      {amISinging && (
+        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+          <button onClick={handleSkipTurn} style={styles.skipBtn}>차례 넘기기 ⏭️</button>
+        </div>
+      )}
+
       <div style={styles.mainDisplay}>
-        {currentSong ? (
-          <div style={styles.songCard}>
-            <h2 style={styles.songTitle}>{currentSong.title}</h2>
-            <p style={styles.songArtist}>{currentSong.artist}</p>
+        {playingVideo ? (
+          <div style={{...styles.songCard, padding: '10px', pointerEvents: amISinging ? 'auto' : 'none' }}>
+            <YouTube 
+              videoId={playingVideo.videoId} 
+              opts={{ 
+                width: '100%', 
+                height: '250', 
+                playerVars: { autoplay: 1, controls: 1 } 
+              }}
+              onStateChange={onPlayerStateChange} 
+            />
+            <h2 style={{...styles.songTitle, marginTop: '10px'}}>{playingVideo.title}</h2>
+            <p style={styles.songArtist}>{playingVideo.artist}</p>
           </div>
         ) : (
-          <div style={styles.emptyCard}>화면을 눌러 노래를 예약하세요</div>
+          <div style={styles.songCard}>
+             <h2 style={styles.songTitle}>대기 중</h2>
+             <p style={styles.emptyCard}>
+               {currentTurnUser ? `현재 차례: ${currentTurnUser.nickname}` : '참여자를 기다리는 중...'}
+             </p>
+          </div>
         )}
       </div>
 
@@ -263,6 +330,8 @@ export default function RoomPage() {
         <div style={styles.userList}>
           {participants.map((p) => {
             const isMe = String(p.id).trim() === String(user?.id).trim();
+            const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false; 
+            
             const statusData = friendStatuses[p.id]; 
             const currentStatus = statusData?.status || statusData; 
             
@@ -276,10 +345,17 @@ export default function RoomPage() {
             else if (isReceived) buttonText = '수락하기';
 
             return (
-              <div key={p.id} style={styles.userItem}>
+              <div key={p.id} style={{
+                ...styles.userItem,
+                border: isThisUserTurn ? '2px solid #f9d423' : 'none' 
+              }}>
                 <div style={styles.userInfo}>
-                  <div style={styles.avatar}>{p.nickname?.[0]}</div>
-                  <span style={styles.userName}>{p.nickname} {isMe && "(나)"}</span>
+                  <div style={{...styles.avatar, background: isThisUserTurn ? '#f9d423' : '#e94560'}}>
+                    {p.nickname?.[0]}
+                  </div>
+                  <span style={styles.userName}>
+                    {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"} 
+                  </span>
                 </div>
                 {!isMe && (
                   <button
@@ -305,20 +381,49 @@ export default function RoomPage() {
         <div style={styles.emojiRow}>
           {EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}
         </div>
-        <button onClick={() => setShowSongPicker(true)} style={styles.addSongBtn}>🎶 노래 예약하기</button>
+        
+        <button 
+          onClick={() => setShowSongPicker(true)} 
+          style={{
+            ...styles.addSongBtn,
+            background: isMyTurn ? '#e94560' : '#444',
+            cursor: isMyTurn ? 'pointer' : 'not-allowed'
+          }}
+          disabled={!isMyTurn}
+        >
+          {isMyTurn ? '🎶 노래 고르기' : '차례 대기'}
+        </button>
       </footer>
 
       {showSongPicker && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
             <header style={styles.modalHeader}>
-              <h3 style={{ margin: 0, fontSize: '1.5rem' }}>노래 찾기</h3>
+              <h3 style={{ margin: 0, fontSize: '1.5rem' }}>노래 찾기 (MR 전용)</h3>
               <button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button>
             </header>
-            <input style={styles.searchInput} value={songSearch} onChange={(e) => searchSongs(e.target.value)} placeholder="제목이나 가수를 입력하세요" />
+            
+            <div style={styles.searchContainer}>
+              <input 
+                style={styles.searchInput} 
+                value={songSearch} 
+                onChange={(e) => setSongSearch(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && executeSearch()}
+                placeholder="노래 제목이나 가수 (예: 사랑의 배터리 MR)" 
+              />
+              <button onClick={executeSearch} style={styles.searchSubmitBtn}>
+                검색
+              </button>
+            </div>
+
             <div style={styles.songList}>
+              {songs.length === 0 && songSearch && (
+                <div style={{ textAlign: 'center', color: '#666', marginTop: '1rem' }}>
+                  검색 결과가 없거나 검색 버튼을 눌러주세요.
+                </div>
+              )}
               {songs.map(s => (
-                <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s.id)}>
+                <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s)}>
                   <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{s.title}</div>
                   <div style={{fontSize: '1rem', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
                 </div>
@@ -378,7 +483,6 @@ export default function RoomPage() {
   );
 }
 
-// 반응형 적용 (clamp, rem, vw)
 const styles = {
   container: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: 'clamp(1rem, 4vw, 2rem)', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' },
   reactionLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 },
@@ -390,6 +494,7 @@ const styles = {
   leaveBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
+  skipBtn: { padding: '0.5rem 1rem', borderRadius: '1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' },
   
   mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 },
   songCard: { textAlign: 'center', padding: 'clamp(1.5rem, 6vw, 3rem)', background: 'rgba(233,69,96,0.1)', borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', boxSizing: 'border-box' },
@@ -405,7 +510,7 @@ const styles = {
   userList: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
   userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.75rem 1rem', borderRadius: '1rem' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
-  avatar: { width: 'clamp(2.5rem, 10vw, 3rem)', height: 'clamp(2.5rem, 10vw, 3rem)', borderRadius: '50%', background: '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1.2rem, 4vw, 1.5rem)', fontWeight: 'bold' },
+  avatar: { width: 'clamp(2.5rem, 10vw, 3rem)', height: 'clamp(2.5rem, 10vw, 3rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1.2rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#fff' },
   userName: { fontSize: 'clamp(1rem, 4vw, 1.125rem)' },
   friendBtn: { padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.85rem, 3vw, 1rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
@@ -414,15 +519,20 @@ const styles = {
   footer: { display: 'flex', flexDirection: 'column', gap: '1rem', zIndex: 10 },
   emojiRow: { display: 'flex', justifyContent: 'space-between' },
   emojiBtn: { fontSize: 'clamp(2rem, 8vw, 2.5rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
-  addSongBtn: { padding: '1rem', borderRadius: '1rem', background: '#e94560', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', border: 'none', cursor: 'pointer' },
+  addSongBtn: { padding: '1rem', borderRadius: '1rem', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', border: 'none' },
   
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200 },
   modal: { background: '#1a1a2e', width: '100%', maxWidth: '28rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
   closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer' },
-  searchInput: { padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '1.125rem', marginBottom: '1rem', width: '100%', boxSizing: 'border-box' },
-  songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh' },
-  songItem: { padding: '1rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' },
+  
+  searchContainer: { display: 'flex', gap: '0.5rem', marginBottom: '1rem', width: '100%' },
+  searchInput: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '1.125rem', boxSizing: 'border-box', outline: 'none' },
+  searchSubmitBtn: { padding: '0 1.25rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
+  
+  songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh', display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  songItem: { padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.75rem', cursor: 'pointer', transition: 'background 0.2s ease' },
+  
   inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '30vh', overflowY: 'auto', marginBottom: '1rem' },
   inviteItem: { display: 'flex', justifyContent: 'space-between', padding: '1rem', borderRadius: '1rem', cursor: 'pointer', transition: 'all 0.2s ease', alignItems: 'center' },
   cancelBtn: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#444', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' },
