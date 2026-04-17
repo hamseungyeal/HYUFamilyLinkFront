@@ -49,6 +49,17 @@ export default function HomePage() {
     const onRoomState = (data) => {
       setLoadingType(null); 
       if (data.roomId) {
+        // ✨ [핵심 해결] 현재 내가 참가자 목록에 있는지 검사합니다. (Stale Closure 방지를 위해 getState 사용)
+        const currentUser = useAuthStore.getState().user;
+        const amIInRoom = data.participants?.some(
+          (p) => String(p.id).trim() === String(currentUser?.id).trim()
+        );
+
+        // 내가 명단에 없다면 (방에서 막 나온 직후라면) 서버의 전체 알림을 무시합니다. (부메랑 현상 차단)
+        if (!amIInRoom) {
+          return;
+        }
+
         setInvitations(prev => prev.filter(inv => inv.roomId !== data.roomId));
         
         const uniqueParticipants = data.participants 

@@ -34,7 +34,14 @@ export default function RoomPage() {
   const [isMicOn, setIsMicOn] = useState(!muted);
   const [playingVideo, setPlayingVideo] = useState(null);
 
-  // 일관된 값 취급: 엄격한 문자열 및 공백 제거 변환 후 비교
+  const playingVideoRef = useRef(playingVideo);
+  const userRef = useRef(user);
+
+  useEffect(() => {
+    playingVideoRef.current = playingVideo;
+    userRef.current = user;
+  }, [playingVideo, user]);
+
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
@@ -43,47 +50,27 @@ export default function RoomPage() {
     setIsMicOn((prev) => !prev); 
   };
 
-  // [1] 방 접속 및 새로고침 복구 & 이벤트 리스너 통합 (과거 안정된 코드 기반)
+  // ✨ [해결] 복잡한 새로고침 복구 로직 삭제 -> 무조건 강제 퇴장 및 리스너 간소화
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || isLeaving.current) return;
-
-    if (!roomId) {
-      const savedCode = sessionStorage.getItem('lastJoinCode');
-      if (savedCode) {
-        socket.emit('room:join', { joinCode: savedCode }, async (res) => {
-          if (res && res.error) {
-            alert('방이 종료되었거나 입장할 수 없습니다.');
-            sessionStorage.removeItem('lastJoinCode');
-            useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
-            navigate('/', { replace: true });
-          } else if (res && res.roomId) {
-            useRoomStore.setState({ roomId: res.roomId, joinCode: savedCode });
-            try {
-              await start(res.roomId);
-              await refreshFriends();
-            } catch (err) {
-              console.error('Audio/VR Start Error:', err);
-            }
-            setIsInitialLoading(false);
-          }
-        });
-      } else {
-        navigate('/', { replace: true });
-        return; // [복구] 이전 코드의 return; 위치
-      }
-    } else {
-      sessionStorage.setItem('lastJoinCode', joinCode || '');
-      const initData = async () => {
-        try {
-          await start(roomId);
-          await refreshFriends(); 
-        } catch (err) {
-          setIsInitialLoading(false);
-        }
-      };
-      initData();
+    
+    // 만약 새로고침을 해서 Zustand의 roomId가 날아갔다면 즉시 홈으로 쫓아냅니다.
+    if (!socket || !roomId || isLeaving.current) {
+      useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
+      navigate('/', { replace: true });
+      return; 
     }
+
+    const initData = async () => {
+      try {
+        await start(roomId);
+        await refreshFriends(); 
+        setIsInitialLoading(false);
+      } catch (err) {
+        setIsInitialLoading(false);
+      }
+    };
+    initData();
 
     const onRoomState = async (data) => {
       if (isLeaving.current) return;
@@ -91,7 +78,6 @@ export default function RoomPage() {
       
       useRoomStore.setState((state) => {
         const rawParticipants = data.participants || state.participants;
-        // 참가자 중복 제거 및 일관된 데이터 구조 유지
         const uniqueParticipants = Array.from(
           new Map(rawParticipants.map(p => [String(p.id).trim(), p])).values()
         );
@@ -101,7 +87,6 @@ export default function RoomPage() {
           roomId: data.roomId || state.roomId,
           participants: uniqueParticipants,
           joinCode: data.joinCode || state.joinCode,
-          // 턴 상태 갱신 누락 방지
           currentTurnId: data.currentTurnId !== undefined ? data.currentTurnId : state.currentTurnId
         };
       });
@@ -157,32 +142,38 @@ export default function RoomPage() {
       socket.off('song:play', onSongPlay);
       socket.off('song:stop', onSongStop);
     };
-  }, [roomId, joinCode, navigate, start, refreshFriends]);
+  }, [roomId, navigate, start, refreshFriends]); // joinCode 등 불필요한 의존성 제거
 
   const handleLeave = async () => {
-  if (isLeaving.current) return;
-  isLeaving.current = true; 
+    if (isLeaving.current) return;
+    isLeaving.current = true; 
 
-  const socket = getSocket();
-  
-  socket?.off('room:state');
-  
-  sessionStorage.removeItem('lastJoinCode');
-  useRoomStore.setState({ 
-    roomId: null, 
-    joinCode: null, 
-    participants: [], 
-    currentSong: null, 
-    currentTurnId: null 
-  });
+    const socket = getSocket();
+    
+    const currentVideo = playingVideoRef.current;
+    const currentUser = userRef.current;
+    if (currentVideo && currentUser && String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
+      socket?.emit('song:end');
+    }
+    
+    socket?.off('room:state');
+    
+    // 강퇴 방식이므로 sessionStorage 조작 삭제
+    useRoomStore.setState({ 
+      roomId: null, 
+      joinCode: null, 
+      participants: [], 
+      currentSong: null, 
+      currentTurnId: null 
+    });
 
-  navigate('/', { replace: true });
+    navigate('/', { replace: true });
 
-  try { 
-    socket?.emit('room:leave'); 
-    await stop(); 
-  } catch (err) {}
-};
+    try { 
+      socket?.emit('room:leave'); 
+      await stop(); 
+    } catch (err) {}
+  };
 
   const handleFriendAction = (targetId) => {
     const socket = getSocket();
@@ -248,22 +239,23 @@ export default function RoomPage() {
 
   const handleSkipTurn = () => {
     getSocket()?.emit('turn:skip');
-    setPlayingVideo(null); // 로컬에서 즉시 영상 제거
+    setPlayingVideo(null); 
   };
 
   const onPlayerStateChange = (event) => {
-    // [수정] amISinging 대신 playingVideo.singerId 를 직접 참조 (Stale Closure 완벽 방지)
-    // event.target.getVideoData() 등을 사용할 수도 있으나, playingVideo 상태가 더 확실함.
-    // YT.PlayerState.ENDED == 0
     if (event.data === 0) {
-      if (playingVideo && String(user?.id).trim() === String(playingVideo.singerId).trim()) {
+      const currentVideo = playingVideoRef.current;
+      const currentUser = userRef.current;
+      
+      if (currentVideo && currentUser && String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
         getSocket()?.emit('song:end');
         setPlayingVideo(null);
       }
     }
   };
 
-  if (!roomId && !sessionStorage.getItem('lastJoinCode') && !isLeaving.current) return null;
+  // 렌더링 전 마지막 튕김 검사 (안전장치)
+  if (!roomId && !isLeaving.current) return null;
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
