@@ -79,7 +79,6 @@ export function useVoice() {
     }
   }, []);
 
-  // ✨ [수정] 마이크 토글 로직: setEnabled 대신 즉각 반응하는 setMuted 적용
   const toggleMute = useCallback(async () => {
     const track = localTrackRef.current;
     if (!track) return;
