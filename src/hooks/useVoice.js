@@ -47,15 +47,25 @@ export function useVoice() {
     try {
       // 2. BackServer에서 Agora 토큰 발급
       console.log('[Agora] fetching token for roomId:', roomId);
-      const { token, uid } = await api.get(`/api/agora/token?roomId=${roomId}`);
+      
+      // API 응답 객체 구조 안전장치 추가
+      const response = await api.get(`/api/agora/token?roomId=${roomId}`);
+      const token = response.data?.token || response.token;
+      const uid = response.data?.uid || response.uid;
+      
       console.log('[Agora] joining channel:', String(roomId), 'uid:', uid);
 
       // 3. 채널 입장
       await client.join(APP_ID, String(roomId), token, uid);
       console.log('[Agora] joined successfully');
 
-      // 4. 마이크 트랙 생성 및 발행
-      const localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      // 4. 마이크 트랙 생성 및 발행 (✨ 노래방 최적화 옵션 적용)
+      const localTrack = await AgoraRTC.createMicrophoneAudioTrack({
+        encoderConfig: "high_quality", // 고음질 전송
+        AEC: true, // 에코 캔슬링 (하울링 방지)
+        ANS: true, // 노이즈 캔슬링
+      });
+      
       localTrackRef.current = localTrack;
       await client.publish(localTrack);
       console.log('[Agora] published local track');
@@ -69,15 +79,19 @@ export function useVoice() {
     }
   }, []);
 
-  const toggleMute = useCallback(() => {
+  // ✨ [수정] 마이크 토글 로직: setEnabled 대신 즉각 반응하는 setMuted 적용
+  const toggleMute = useCallback(async () => {
     const track = localTrackRef.current;
     if (!track) return;
-    if (muted) {
-      track.setEnabled(true);
-    } else {
-      track.setEnabled(false);
+    
+    try {
+      const newMutedState = !muted;
+      await track.setMuted(newMutedState); 
+      setMuted(newMutedState);
+      console.log(`[Agora] Microphone is now ${newMutedState ? 'Muted 🔇' : 'Unmuted 🎤'}`);
+    } catch (err) {
+      console.error('[Agora] toggleMute failed:', err);
     }
-    setMuted((m) => !m);
   }, [muted]);
 
   const stop = useCallback(async () => {
