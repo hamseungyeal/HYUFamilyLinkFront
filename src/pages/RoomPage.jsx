@@ -207,7 +207,6 @@ export default function RoomPage() {
     setSelectedFriends([]);
   };
 
-  // 모달 바깥 영역 클릭 핸들러
   const handleModalOutsideClick = (e, setter) => {
     if (e.target === e.currentTarget) {
       setter(false);
@@ -269,13 +268,13 @@ export default function RoomPage() {
         @keyframes pulseGlow { 0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } 50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; } 100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } }
         @keyframes heartbeat { 0% { transform: scale(1); } 15% { transform: scale(1.1); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } 60% { transform: scale(1); } }
         
-        /* ✨ 유튜브 iframe을 부모 요소 크기에 맞춰 유동적으로 꽉 채워주는 클래스 */
         .youtube-video-container {
           position: relative;
           width: 100%;
-          aspect-ratio: 16 / 9; /* 최신 브라우저 종횡비 지원 */
-          overflow: hidden;
+          flex: 1; 
+          min-height: 0;
           border-radius: 0.75rem;
+          overflow: hidden;
         }
         .youtube-video-container iframe {
           position: absolute;
@@ -307,16 +306,9 @@ export default function RoomPage() {
         </button>
       </header>
 
-      {amISinging && (
-        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-          <button onClick={handleSkipTurn} style={styles.skipBtn}>차례 넘기기 ⏭️</button>
-        </div>
-      )}
-
-      {/* ✨ 영상 크기 유동화를 위한 스타일 개선 적용 */}
       <div style={styles.mainDisplay}>
         {playingVideo ? (
-          <div style={{...styles.songCard, padding: 'clamp(1rem, 3vw, 1.5rem)', pointerEvents: amISinging ? 'auto' : 'none' }}>
+          <div style={{...styles.songCard, pointerEvents: amISinging ? 'auto' : 'none' }}>
             <div className="youtube-video-container">
               <YouTube 
                 videoId={playingVideo.videoId} 
@@ -350,7 +342,7 @@ export default function RoomPage() {
           </button>
         </div>
 
-        <div style={styles.userList}>
+        <div className="custom-scroll" style={styles.userList}>
           {participants.map((p) => {
             const isMe = String(p.id).trim() === String(user?.id).trim();
             const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false; 
@@ -405,17 +397,26 @@ export default function RoomPage() {
           {EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}
         </div>
         
-        <button 
-          onClick={() => setShowSongPicker(true)} 
-          style={{
-            ...styles.addSongBtn,
-            background: isMyTurn ? '#e94560' : '#444',
-            cursor: isMyTurn ? 'pointer' : 'not-allowed'
-          }}
-          disabled={!isMyTurn}
-        >
-          {isMyTurn ? '🎶 노래 고르기' : '차례 대기'}
-        </button>
+        {amISinging ? (
+          <button 
+            onClick={handleSkipTurn} 
+            style={{...styles.addSongBtn, background: '#f9d423', color: '#1a1a2e'}}
+          >
+            차례 넘기기 ⏭️
+          </button>
+        ) : (
+          <button 
+            onClick={() => setShowSongPicker(true)} 
+            style={{
+              ...styles.addSongBtn,
+              background: isMyTurn ? '#e94560' : '#444',
+              cursor: isMyTurn ? 'pointer' : 'not-allowed'
+            }}
+            disabled={!isMyTurn}
+          >
+            {isMyTurn ? '🎶 노래 고르기' : '차례 대기'}
+          </button>
+        )}
       </footer>
 
       {showSongPicker && (
@@ -511,39 +512,50 @@ const styles = {
   reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '0.25rem 0.75rem', borderRadius: '1rem', fontSize: 'clamp(0.8rem, 3vw, 1rem)', fontWeight: 'bold', marginBottom: '0.25rem', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
   reactionEmoji: { fontSize: 'clamp(2.5rem, 8vw, 3.5rem)' },
   
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', zIndex: 10, gap: '0.5rem' },
-  leaveBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', zIndex: 10, gap: '0.5rem' },
+  leaveBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
-  muteBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
-  skipBtn: { padding: '0.5rem 1rem', borderRadius: '1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', fontWeight: 'bold', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', cursor: 'pointer' },
+  muteBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
   
-  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 },
-  songCard: { textAlign: 'center', padding: 'clamp(1.5rem, 6vw, 3rem)', background: 'rgba(233,69,96,0.1)', borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '40rem', boxSizing: 'border-box' },
-  songTitle: { fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all' },
-  songArtist: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#aaa', margin: 0 },
-  emptyCard: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', color: '#666', textAlign: 'center' },
+  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, width: '100%', marginBottom: '1rem' },
   
-  participantSection: { marginBottom: '1.5rem' },
-  participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' },
-  subTitle: { fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', color: '#e94560', margin: 0 },
-  inviteBtn: { padding: '0.5rem 0.75rem', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.85rem, 3vw, 1rem)' },
+  // ✨ 영상 창 크기 증가 및 대기 중 화면 크기 완벽 일치
+  songCard: { 
+    display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+    textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)', 
+    borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '34rem', 
+    height: 'clamp(14rem, 35vh, 20rem)', boxSizing: 'border-box' 
+  },
   
-  userList: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.75rem 1rem', borderRadius: '1rem' },
+  // ✨ 노래 제목 크기 축소 (영상을 더 살리기 위해)
+  songTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all', color: '#fff' },
+  songArtist: { fontSize: 'clamp(0.85rem, 3.5vw, 1rem)', color: '#aaa', margin: 0 },
+  emptyCard: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#666', textAlign: 'center' },
+  
+  participantSection: { marginBottom: '1rem' },
+  participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' },
+  subTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.15rem)', color: '#e94560', margin: 0 },
+  inviteBtn: { padding: '0.4rem 0.6rem', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)' },
+  
+  // ✨ 참여자 목록 및 요소 크기 축소 (정확히 3명이 보이도록 12rem으로 높이 설정)
+  userList: { display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '12rem', overflowY: 'auto', paddingRight: '0.5rem' },
+  userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.6rem 0.8rem', borderRadius: '0.75rem' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
-  avatar: { width: 'clamp(2.5rem, 10vw, 3rem)', height: 'clamp(2.5rem, 10vw, 3rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1.2rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#fff' },
-  userName: { fontSize: 'clamp(1rem, 4vw, 1.125rem)' },
-  friendBtn: { padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.85rem, 3vw, 1rem)', whiteSpace: 'nowrap' },
+  avatar: { width: 'clamp(2rem, 8vw, 2.5rem)', height: 'clamp(2rem, 8vw, 2.5rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', fontWeight: 'bold', color: '#fff' },
+  userName: { fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
+  friendBtn: { padding: '0.4rem 0.6rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
   alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
   
-  footer: { display: 'flex', flexDirection: 'column', gap: '1rem', zIndex: 10 },
+  footer: { display: 'flex', flexDirection: 'column', gap: '0.75rem', zIndex: 10 },
   emojiRow: { display: 'flex', justifyContent: 'space-between' },
-  emojiBtn: { fontSize: 'clamp(2rem, 8vw, 2.5rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
-  addSongBtn: { padding: '1rem', borderRadius: '1rem', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', border: 'none' },
+  emojiBtn: { fontSize: 'clamp(1.8rem, 7vw, 2.2rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
+  
+  // ✨ 버튼 크기 축소
+  addSongBtn: { padding: '0.75rem', borderRadius: '0.75rem', color: '#fff', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold', border: 'none', transition: '0.3s' },
   
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200, cursor: 'pointer' },
-  modal: { background: '#1a1a2e', width: '100%', maxWidth: '32rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
+  modal: { background: '#1a1a2e', width: '100%', maxWidth: '28rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
   closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer' },
   
