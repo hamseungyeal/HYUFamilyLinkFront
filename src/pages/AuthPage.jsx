@@ -9,29 +9,9 @@ export default function AuthPage() {
   const [birthdate, setBirthdate] = useState(''); // 4자리 숫자 PIN
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
 
   const setAuth = useAuthStore((s) => s.setAuth);
   const navigate = useNavigate();
-
-  // 음성 인식 설정 (Web Speech API) - 방 페이지 이식 예정 기능
-  const handleVoiceInput = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'ko-KR';
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setName(transcript.replace(/\s/g, '')); // 공백 제거 후 성함 설정
-    };
-    recognition.start();
-  };
 
   const handleNumberClick = (num) => {
     if (birthdate.length < 4) {
@@ -103,9 +83,7 @@ export default function AuthPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="이름을 입력하세요"
             />
-            <button onClick={handleVoiceInput} style={{...styles.voiceBtn, background: isListening ? '#ff4b2b' : '#30475e'}}>
-              {isListening ? '듣고 있어요' : '🎤 말하기'}
-            </button>
+            {/* 음성 인식 버튼 제거됨 */}
           </div>
         </div>
 
@@ -153,7 +131,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     background: '#1a1a2e',
-    // 수정: % 대신 clamp를 사용하여 너무 커지거나 작아지지 않게 방어
+    // % 대신 clamp를 사용하여 너무 커지거나 작아지지 않게 방어
     padding: 'clamp(1rem, 5vw, 2rem)', 
     boxSizing: 'border-box',
   },
@@ -161,7 +139,7 @@ const styles = {
     background: 'rgba(255,255,255,0.05)',
     backdropFilter: 'blur(10px)',
     borderRadius: '1.5rem',
-    // 수정: 카드 내부 패딩이 무한정 넓어져서 콘텐츠 영역을 침범하지 않도록 상한선(2.5rem) 설정
+    // 카드 내부 패딩이 무한정 넓어져서 콘텐츠 영역을 침범하지 않도록 상한선 설정
     padding: 'clamp(1.5rem, 5vw, 2.5rem)', 
     width: '100%',
     maxWidth: '32rem', 
@@ -182,11 +160,6 @@ const styles = {
     flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none',
     background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 'clamp(1.2rem, 4.5vw, 1.5rem)', outline: 'none',
     boxSizing: 'border-box', minWidth: 0 
-  },
-  voiceBtn: { 
-    padding: '0 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', 
-    fontSize: 'clamp(1rem, 3.5vw, 1.125rem)', cursor: 'pointer', fontWeight: 'bold', 
-    whiteSpace: 'nowrap' 
   },
   
   pinDisplay: { display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '1.25rem', fontSize: '2rem', color: '#e94560' },
