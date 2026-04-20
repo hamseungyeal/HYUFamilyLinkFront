@@ -50,11 +50,9 @@ export default function RoomPage() {
     setIsMicOn((prev) => !prev); 
   };
 
-  // ✨ [해결] 복잡한 새로고침 복구 로직 삭제 -> 무조건 강제 퇴장 및 리스너 간소화
   useEffect(() => {
     const socket = getSocket();
     
-    // 만약 새로고침을 해서 Zustand의 roomId가 날아갔다면 즉시 홈으로 쫓아냅니다.
     if (!socket || !roomId || isLeaving.current) {
       useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
       navigate('/', { replace: true });
@@ -142,7 +140,7 @@ export default function RoomPage() {
       socket.off('song:play', onSongPlay);
       socket.off('song:stop', onSongStop);
     };
-  }, [roomId, navigate, start, refreshFriends]); // joinCode 등 불필요한 의존성 제거
+  }, [roomId, navigate, start, refreshFriends]); 
 
   const handleLeave = async () => {
     if (isLeaving.current) return;
@@ -158,7 +156,6 @@ export default function RoomPage() {
     
     socket?.off('room:state');
     
-    // 강퇴 방식이므로 sessionStorage 조작 삭제
     useRoomStore.setState({ 
       roomId: null, 
       joinCode: null, 
@@ -210,6 +207,13 @@ export default function RoomPage() {
     setSelectedFriends([]);
   };
 
+  // 모달 바깥 영역 클릭 핸들러
+  const handleModalOutsideClick = (e, setter) => {
+    if (e.target === e.currentTarget) {
+      setter(false);
+    }
+  };
+
   const invitableFriends = friends?.filter(f => 
     !participants.some(p => String(p.id).trim() === String(f.id).trim())
   ) || [];
@@ -254,7 +258,6 @@ export default function RoomPage() {
     }
   };
 
-  // 렌더링 전 마지막 튕김 검사 (안전장치)
   if (!roomId && !isLeaving.current) return null;
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
@@ -265,6 +268,22 @@ export default function RoomPage() {
         @keyframes bubbleUp { 0% { transform: translateY(0) scale(0.5); opacity: 0; } 20% { opacity: 1; transform: translateY(-50px) scale(1.2); } 100% { transform: translateY(-350px) scale(1); opacity: 0; } }
         @keyframes pulseGlow { 0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } 50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; } 100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } }
         @keyframes heartbeat { 0% { transform: scale(1); } 15% { transform: scale(1.1); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } 60% { transform: scale(1); } }
+        
+        /* ✨ 유튜브 iframe을 부모 요소 크기에 맞춰 유동적으로 꽉 채워주는 클래스 */
+        .youtube-video-container {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9; /* 최신 브라우저 종횡비 지원 */
+          overflow: hidden;
+          border-radius: 0.75rem;
+        }
+        .youtube-video-container iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+        }
       `}</style>
 
       <div style={styles.reactionLayer}>
@@ -294,20 +313,19 @@ export default function RoomPage() {
         </div>
       )}
 
+      {/* ✨ 영상 크기 유동화를 위한 스타일 개선 적용 */}
       <div style={styles.mainDisplay}>
         {playingVideo ? (
-          <div style={{...styles.songCard, padding: '10px', pointerEvents: amISinging ? 'auto' : 'none' }}>
-            <YouTube 
-              videoId={playingVideo.videoId} 
-              opts={{ 
-                width: '100%', 
-                height: '250', 
-                playerVars: { autoplay: 1, controls: 1 } 
-              }}
-              host="https://www.youtube-nocookie.com"
-              onStateChange={onPlayerStateChange} 
-            />
-            <h2 style={{...styles.songTitle, marginTop: '10px'}}>{playingVideo.title}</h2>
+          <div style={{...styles.songCard, padding: 'clamp(1rem, 3vw, 1.5rem)', pointerEvents: amISinging ? 'auto' : 'none' }}>
+            <div className="youtube-video-container">
+              <YouTube 
+                videoId={playingVideo.videoId} 
+                opts={{ playerVars: { autoplay: 1, controls: 1 } }}
+                host="https://www.youtube-nocookie.com"
+                onStateChange={onPlayerStateChange} 
+              />
+            </div>
+            <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
             <p style={styles.songArtist}>{playingVideo.artist}</p>
           </div>
         ) : (
@@ -401,10 +419,10 @@ export default function RoomPage() {
       </footer>
 
       {showSongPicker && (
-        <div style={styles.modalOverlay}>
+        <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowSongPicker)}>
           <div style={styles.modal}>
             <header style={styles.modalHeader}>
-              <h3 style={{ margin: 0, fontSize: '1.5rem' }}>노래 찾기 (MR 전용)</h3>
+              <h3 style={{ margin: 0, fontSize: 'clamp(1.2rem, 5vw, 1.5rem)' }}>노래 찾기 (MR 전용)</h3>
               <button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button>
             </header>
             
@@ -414,23 +432,21 @@ export default function RoomPage() {
                 value={songSearch} 
                 onChange={(e) => setSongSearch(e.target.value)} 
                 onKeyDown={(e) => e.key === 'Enter' && executeSearch()}
-                placeholder="노래 제목이나 가수 (예: 사랑의 배터리 MR)" 
+                placeholder="제목이나 가수 (예: 사랑의 배터리 MR)" 
               />
-              <button onClick={executeSearch} style={styles.searchSubmitBtn}>
-                검색
-              </button>
+              <button onClick={executeSearch} style={styles.searchSubmitBtn}>검색</button>
             </div>
 
-            <div style={styles.songList}>
+            <div className="custom-scroll" style={styles.songList}>
               {songs.length === 0 && songSearch && (
-                <div style={{ textAlign: 'center', color: '#666', marginTop: '1rem' }}>
+                <div style={{ textAlign: 'center', color: '#666', marginTop: '1.5rem', fontSize: '1rem' }}>
                   검색 결과가 없거나 검색 버튼을 눌러주세요.
                 </div>
               )}
               {songs.map(s => (
                 <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s)}>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{s.title}</div>
-                  <div style={{fontSize: '1rem', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
+                  <div style={{ fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold' }}>{s.title}</div>
+                  <div style={{fontSize: 'clamp(0.9rem, 3.5vw, 1rem)', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
                 </div>
               ))}
             </div>
@@ -439,14 +455,14 @@ export default function RoomPage() {
       )}
 
       {showInviteModal && (
-        <div style={styles.modalOverlay}>
+        <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowInviteModal)}>
           <div style={styles.modal}>
-            <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: '1.75rem'}}>방으로 친구 초대</h2>
-            <p style={{color: '#aaa', marginBottom: '1.5rem', fontSize: '1rem'}}>지금 바로 방에 참여할 친구를 선택하세요.</p>
+            <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: 'clamp(1.5rem, 6vw, 1.75rem)'}}>방으로 친구 초대</h2>
+            <p style={{color: '#aaa', marginBottom: '1.5rem', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)'}}>지금 바로 방에 참여할 친구를 선택하세요.</p>
             
-            <div style={styles.inviteFriendList}>
+            <div className="custom-scroll" style={styles.inviteFriendList}>
               {invitableFriends.length === 0 ? (
-                <div style={{textAlign: 'center', color: '#666', padding: '1.5rem 0', fontSize: '1.1rem'}}>초대할 수 있는 친구가 없습니다.</div>
+                <div style={{textAlign: 'center', color: '#666', padding: '1.5rem 0', fontSize: 'clamp(1rem, 4vw, 1.125rem)'}}>초대할 수 있는 친구가 없습니다.</div>
               ) : (
                 invitableFriends.map(friend => (
                   <div 
@@ -458,7 +474,7 @@ export default function RoomPage() {
                     }}
                     onClick={() => toggleFriendSelect(friend.id)}
                   >
-                    <span style={{fontSize: '1.125rem', fontWeight: 'bold'}}>{friend.nickname}</span>
+                    <span style={{fontSize: 'clamp(1rem, 4vw, 1.125rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
                     <div style={{
                       width: '1.5rem', height: '1.5rem', borderRadius: '50%', border: '2px solid #fff',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
@@ -499,12 +515,12 @@ const styles = {
   leaveBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.6rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
-  skipBtn: { padding: '0.5rem 1rem', borderRadius: '1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' },
+  skipBtn: { padding: '0.5rem 1rem', borderRadius: '1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', fontWeight: 'bold', fontSize: 'clamp(0.9rem, 3.5vw, 1.125rem)', cursor: 'pointer' },
   
   mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 },
-  songCard: { textAlign: 'center', padding: 'clamp(1.5rem, 6vw, 3rem)', background: 'rgba(233,69,96,0.1)', borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', boxSizing: 'border-box' },
-  songTitle: { fontSize: 'clamp(1.8rem, 8vw, 3rem)', margin: '0 0 0.5rem', wordBreak: 'keep-all' },
-  songArtist: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', color: '#aaa', margin: 0 },
+  songCard: { textAlign: 'center', padding: 'clamp(1.5rem, 6vw, 3rem)', background: 'rgba(233,69,96,0.1)', borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '40rem', boxSizing: 'border-box' },
+  songTitle: { fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all' },
+  songArtist: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#aaa', margin: 0 },
   emptyCard: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', color: '#666', textAlign: 'center' },
   
   participantSection: { marginBottom: '1.5rem' },
@@ -526,20 +542,20 @@ const styles = {
   emojiBtn: { fontSize: 'clamp(2rem, 8vw, 2.5rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
   addSongBtn: { padding: '1rem', borderRadius: '1rem', color: '#fff', fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', border: 'none' },
   
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200 },
-  modal: { background: '#1a1a2e', width: '100%', maxWidth: '28rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200, cursor: 'pointer' },
+  modal: { background: '#1a1a2e', width: '100%', maxWidth: '32rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
   closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer' },
   
   searchContainer: { display: 'flex', gap: '0.5rem', marginBottom: '1rem', width: '100%' },
-  searchInput: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '1.125rem', boxSizing: 'border-box', outline: 'none' },
+  searchInput: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 'clamp(1rem, 4vw, 1.125rem)', boxSizing: 'border-box', outline: 'none', minWidth: 0 },
   searchSubmitBtn: { padding: '0 1.25rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   
-  songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh', display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.5rem' },
   songItem: { padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.75rem', cursor: 'pointer', transition: 'background 0.2s ease' },
   
-  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '30vh', overflowY: 'auto', marginBottom: '1rem' },
+  inviteFriendList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '30vh', overflowY: 'auto', marginBottom: '1rem', paddingRight: '0.5rem' },
   inviteItem: { display: 'flex', justifyContent: 'space-between', padding: '1rem', borderRadius: '1rem', cursor: 'pointer', transition: 'all 0.2s ease', alignItems: 'center' },
-  cancelBtn: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#444', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' },
-  confirmBtn: { flex: 2, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }
+  cancelBtn: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#444', color: '#fff', fontSize: 'clamp(0.9rem, 3.5vw, 1.1rem)', fontWeight: 'bold', cursor: 'pointer' },
+  confirmBtn: { flex: 2, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: 'clamp(0.9rem, 3.5vw, 1.1rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }
 };
