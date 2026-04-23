@@ -353,7 +353,7 @@ export default function RoomPage() {
             const isReceived = currentStatus === 'received';
             const isFriend = currentStatus === 'friend';
             const isSent = currentStatus === 'sent';
-
+            const avatarPath = p.profileImage > 0 ? `/avatars/${p.profileImage}.jpg` : '/avatars/default.jpg';
             let buttonText = '➕ 추가';
             if (isFriend) buttonText = '✓ 친구';
             else if (isSent) buttonText = '요청됨';
@@ -365,9 +365,13 @@ export default function RoomPage() {
                 border: isThisUserTurn ? '2px solid #f9d423' : 'none' 
               }}>
                 <div style={styles.userInfo}>
-                  <div style={{...styles.avatar, background: isThisUserTurn ? '#f9d423' : '#e94560'}}>
-                    {p.nickname?.[0]}
-                  </div>
+                  <div style={{...styles.avatar, background: 'transparent', overflow: 'hidden'}}>
+            <img 
+              src={avatarPath} 
+              alt="프로필" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+            />
+          </div>
                   <span style={styles.userName}>
                     {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"} 
                   </span>

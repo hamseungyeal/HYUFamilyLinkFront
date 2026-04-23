@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { useRoomStore } from '../store/roomStore';
@@ -18,15 +18,28 @@ export default function HomePage() {
   const [selectedFriends, setSelectedFriends] = useState([]); // 선택된 친구 ID 배열
   const [invitations, setInvitations] = useState([]); // 나에게 온 초대 목록
 
+  // [아바타 기능] 관련 상태
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const avatarList = Array.from({ length: 12 }, (_, i) => i + 1); // [1, 2, ..., 12]
+
   const navigate = useNavigate();
+  const location = useLocation();
   
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const setAuth = useAuthStore((s) => s.setAuth); // 프로필 업데이트 후 정보 갱신용
   const friends = useAuthStore((s) => s.friends); 
   const friendStatuses = useAuthStore((s) => s.friendStatuses); 
   const refreshFriends = useAuthStore((s) => s.refreshFriends); 
 
   const roomId = useRoomStore((s) => s.roomId);
+
+  // 로그인 시 프로필 미설정 유저 강제 팝업 체크
+  useEffect(() => {
+    if (location.state?.forceProfileSetup || !user?.profileImage || user?.profileImage === 0) {
+      setShowAvatarPicker(true);
+    }
+  }, [location.state, user]);
 
   useEffect(() => {
     if (roomId) navigate('/room');
@@ -42,7 +55,7 @@ export default function HomePage() {
     }
   }, []);
 
- useEffect(() => {
+  useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
@@ -56,9 +69,7 @@ export default function HomePage() {
         );
 
         // 내가 명단에 없다면 (방에서 막 나온 직후라면) 서버의 전체 알림을 무시합니다. (부메랑 현상 차단)
-        if (!amIInRoom) {
-          return;
-        }
+        if (!amIInRoom) return;
 
         setInvitations(prev => prev.filter(inv => inv.roomId !== data.roomId));
         
@@ -114,6 +125,29 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [fetchActiveRooms, refreshFriends]);
 
+
+const handleAvatarSelect = async (index) => {
+    try {
+      setLoadingType('avatar');
+      const res = await api.put('/api/auth/profile', { profileImage: index });
+      const { user: updatedUser, token: newToken } = res;
+
+      if (updatedUser && newToken) {
+        setAuth(updatedUser, newToken);
+        getSocket()?.emit('user:update_profile');
+        setShowAvatarPicker(false);
+        alert("프로필이 성공적으로 변경되었습니다!");
+      } else {
+        throw new Error("응답 데이터가 올바르지 않습니다.");
+      }
+    } catch (err) {
+      console.error("프로필 변경 상세 에러:", err);
+      alert(err.message || "프로필 변경에 실패했습니다.");
+    } finally {
+      setLoadingType(null);
+    }
+  };
+
   const handleRandomMatch = () => {
     setError('');
     setLoadingType('match');
@@ -166,8 +200,13 @@ export default function HomePage() {
     }
   };
 
-  // 모달 바깥쪽(오버레이) 클릭 시 닫히도록 처리하는 함수
+  // 모달 바깥쪽(오버레이) 클릭 시 닫히도록 처리하는 함수 (아바타 강제 설정 방어 추가)
   const handleModalOutsideClick = (e, setter) => {
+    if (setter === setShowAvatarPicker) {
+      const isForced = !user?.profileImage || user?.profileImage === 0;
+      if (isForced) return;
+    }
+    
     if (e.target === e.currentTarget) {
       setter(false);
     }
@@ -207,7 +246,16 @@ export default function HomePage() {
 
       <div style={styles.container}>
         <div style={styles.header}>
-          <span style={styles.userInfo}>🎤 {user?.nickname || '손님'}님, 환영합니다!</span>
+          <div style={styles.userProfileGroup}>
+            <button onClick={() => setShowAvatarPicker(true)} style={styles.avatarButton}>
+              <img 
+                src={user?.profileImage > 0 ? `/avatars/${user.profileImage}.jpg` : '/avatars/default.jpg'} 
+                style={styles.headerAvatarImg}
+                alt="내 프로필"
+              />
+            </button>
+            <span style={styles.userInfo}>{user?.nickname || '손님'}님, 환영합니다!</span>
+          </div>
           <button onClick={logout} style={styles.logoutBtn}>로그아웃</button>
         </div>
 
@@ -230,6 +278,30 @@ export default function HomePage() {
             {hasNewFriendRequest ? `🔔 ${receivedRequestsCount}개의 새 친구 요청 확인하기` : '👥 친구 관리 및 찾기'}
           </button>
         </div>
+
+        {/* --- 아바타 선택 창 팝업(모달) --- */}
+        {showAvatarPicker && (
+          <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowAvatarPicker)}>
+            <div style={styles.avatarModal}>
+              <div style={styles.modalHeader}>
+                <h3 style={styles.panelTitle}>나의 아바타 고르기</h3>
+                {/* 프로필이 이미 있는 경우에만 닫기 버튼 노출 */}
+                {user?.profileImage > 0 && <button onClick={() => setShowAvatarPicker(false)} style={styles.closeBtn}>✕</button>}
+              </div>
+              <p style={styles.modalDesc}>나를 잘 나타내는 얼굴을 선택해 주세요!</p>
+              <div className="custom-scroll" style={styles.avatarGrid}>
+                {avatarList.map((idx) => (
+                  <button key={idx} onClick={() => handleAvatarSelect(idx)} style={{
+                    ...styles.avatarOption,
+                    border: user?.profileImage === idx ? '4px solid #f9d423' : '4px solid transparent'
+                  }}>
+                    <img src={`/avatars/${idx}.jpg`} style={styles.avatarGridImg} alt={`아바타 ${idx}`} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* --- 친구 관리창 팝업(모달) --- */}
         {showFriendManager && (
@@ -259,9 +331,10 @@ export default function HomePage() {
                   <>
                     {friends.map(friend => (
                       <div key={friend.id} style={styles.friendItem}>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <img src={friend.profileImage > 0 ? `/avatars/${friend.profileImage}.jpg` : '/avatars/default.jpg'} style={styles.listAvatarImg} alt="친구" />
                           <span style={{fontSize: 'clamp(1.1rem, 4vw, 1.3rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
-                          <span style={{color: '#aaa', fontSize: 'clamp(0.9rem, 3vw, 1rem)', marginLeft: '0.75rem'}}>✓ 내 친구</span>
+                          <span style={{color: '#aaa', fontSize: 'clamp(0.9rem, 3vw, 1rem)'}}>✓ 내 친구</span>
                         </div>
                         <button onClick={() => handleFriendRemove(friend.id, 'remove')} style={styles.deleteBtn}>삭제</button>
                       </div>
@@ -304,7 +377,10 @@ export default function HomePage() {
                   >
                     <div style={styles.roomCardLeft}>
                       {isInvite && <div style={{ color: '#f9d423', fontWeight: 'bold', marginBottom: '0.25rem', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' }}>✨ {room.hostName}님의 초대!</div>}
-                      <div style={styles.hostName}>{room.hostName}님의 방</div>
+                      <div style={styles.hostProfileBox}>
+                        <img src={room.hostProfileImage > 0 ? `/avatars/${room.hostProfileImage}.jpg` : '/avatars/default.jpg'} style={styles.listAvatarImg} alt="방장" />
+                        <span style={styles.hostName}>{room.hostName}님의 방</span>
+                      </div>
                       <div style={styles.songInfo}>🎶 {room.currentSong || '대기 중'}</div>
                     </div>
                     <div style={styles.roomCardRight}>
@@ -367,7 +443,10 @@ export default function HomePage() {
                       }}
                       onClick={() => toggleFriendSelect(friend.id)}
                     >
-                      <span style={{fontSize: 'clamp(1.1rem, 4vw, 1.3rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <img src={friend.profileImage > 0 ? `/avatars/${friend.profileImage}.jpg` : '/avatars/default.jpg'} style={styles.listAvatarImg} alt="친구" />
+                        <span style={{fontSize: 'clamp(1.1rem, 4vw, 1.3rem)', fontWeight: 'bold'}}>{friend.nickname}</span>
+                      </div>
                       <div style={{
                         width: '1.75rem', height: '1.75rem', borderRadius: '50%', border: '2px solid #fff',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem',
@@ -402,6 +481,9 @@ const styles = {
   container: { width: '100%', maxWidth: '40rem', padding: 'clamp(1.5rem, 5vw, 2.5rem) clamp(1rem, 4vw, 1.5rem)', color: '#fff', position: 'relative', boxSizing: 'border-box' },
   
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '0.5rem' },
+  userProfileGroup: { display: 'flex', alignItems: 'center', gap: '1rem' },
+  avatarButton: { width: 'clamp(3rem, 10vw, 4rem)', height: 'clamp(3rem, 10vw, 4rem)', borderRadius: '50%', border: '3px solid #e94560', padding: 0, overflow: 'hidden', cursor: 'pointer', background: '#16213e', flexShrink: 0 },
+  headerAvatarImg: { width: '100%', height: '100%', objectFit: 'cover' },
   userInfo: { fontSize: 'clamp(1.2rem, 5vw, 1.5rem)', fontWeight: 'bold', wordBreak: 'keep-all' },
   logoutBtn: { background: 'transparent', border: '1px solid #aaa', color: '#aaa', padding: '0.5rem 0.75rem', borderRadius: '0.5rem', cursor: 'pointer', fontSize: 'clamp(0.85rem, 3.5vw, 1rem)', whiteSpace: 'nowrap' },
   
@@ -410,15 +492,21 @@ const styles = {
   createBtn: { width: '100%', padding: 'clamp(1.25rem, 5vw, 1.5rem)', borderRadius: '1.25rem', border: 'none', background: '#4a4e69', color: '#fff', fontSize: 'clamp(1.3rem, 5.5vw, 1.5rem)', fontWeight: 'bold', cursor: 'pointer', boxSizing: 'border-box', transition: '0.2s ease' },
   friendSingBtn: { padding: 'clamp(1.25rem, 5vw, 1.5rem)', borderRadius: '1.25rem', border: '2px solid #e94560', background: 'transparent', color: '#e94560', fontSize: 'clamp(1.3rem, 5.5vw, 1.5rem)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease' },
   
-  // 친구 관리 모달 및 초대 모달: 최대 크기와 내부 글씨 크기 확장
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem', cursor: 'pointer' }, // 오버레이 클릭 가능하도록
-  friendModal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '36rem', border: '1px solid #333', boxSizing: 'border-box', position: 'relative', cursor: 'default' }, // 내부 요소 클릭 시 이벤트 전파 방지
+  // 친구 관리 모달, 초대 모달, 아바타 모달
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem', cursor: 'pointer' }, 
+  friendModal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '36rem', border: '1px solid #333', boxSizing: 'border-box', position: 'relative', cursor: 'default' }, 
   modal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: '1.5rem', width: '100%', maxWidth: '32rem', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
+  avatarModal: { background: '#1a1a2e', padding: 'clamp(1.5rem, 5vw, 2.5rem)', borderRadius: '2rem', width: '100%', maxWidth: '32rem', border: '2px solid #333', boxSizing: 'border-box', cursor: 'default' },
   
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #333', paddingBottom: '1rem' },
   panelTitle: { margin: 0, color: '#e94560', fontSize: 'clamp(1.4rem, 6vw, 1.8rem)' },
   closeBtn: { background: 'transparent', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer', padding: '0.5rem' },
   
+  modalDesc: { textAlign: 'center', color: '#aaa', marginBottom: '1.5rem', fontSize: 'clamp(1rem, 4vw, 1.1rem)' },
+  avatarGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'clamp(0.75rem, 3vw, 1.25rem)', maxHeight: '50vh', overflowY: 'auto', padding: '0.5rem' },
+  avatarOption: { background: '#16213e', borderRadius: '50%', padding: 0, overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.2s', aspectRatio: '1/1' },
+  avatarGridImg: { width: '100%', height: '100%', objectFit: 'cover' },
+
   friendList: { display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '50vh', overflowY: 'auto', paddingRight: '0.5rem' },
   friendItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem', background: 'rgba(255,255,255,0.05)', borderRadius: '1rem' },
   acceptBtn: { padding: '0.6rem 1rem', background: '#f9d423', color: '#1a1a2e', border: 'none', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.95rem, 3.5vw, 1.1rem)' },
@@ -431,6 +519,8 @@ const styles = {
   scrollContainer: { display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '23rem', overflowY: 'auto', paddingRight: '0.5rem' },
   roomCard: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: 'clamp(1rem, 4vw, 1.5rem)', borderRadius: '1.25rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', transition: 'all 0.3s ease' },
   roomCardLeft: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  hostProfileBox: { display: 'flex', alignItems: 'center', gap: '0.6rem' },
+  listAvatarImg: { width: '2.5rem', height: '2.5rem', borderRadius: '50%', objectFit: 'cover', background: '#333' },
   hostName: { fontSize: 'clamp(1.2rem, 5vw, 1.4rem)', fontWeight: 'bold' },
   songInfo: { fontSize: 'clamp(1rem, 4vw, 1.125rem)', color: '#ffb3bd' },
   roomCardRight: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' },

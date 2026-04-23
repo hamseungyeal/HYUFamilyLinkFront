@@ -47,8 +47,20 @@ export default function AuthPage() {
         data = await api.post('/api/auth/register', payload);
       }
 
+      // 상태 관리 스토어에 유저 정보(profileImage 포함) 저장
       setAuth(data.user, data.token);
-      navigate('/');
+      
+      // ✨ [추가/수정] 프로필 이미지가 미설정(0 또는 null) 상태인지 확인
+      const hasNoProfile = !data.user.profileImage || data.user.profileImage === 0;
+
+      if (hasNoProfile) {
+        // 프로필이 없다면 홈페이지로 이동하되, '강제 설정 모달을 띄워라'는 신호를 함께 보냅니다.
+        navigate('/', { state: { forceProfileSetup: true }, replace: true });
+      } else {
+        // 정상 유저는 일반적인 홈 이동
+        navigate('/', { replace: true });
+      }
+
     } catch (err) {
       console.error(err);
       setError(err.message || '접속에 실패했습니다.');
