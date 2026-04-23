@@ -484,25 +484,36 @@ export default function RoomPage() {
         </div>
         
         {amISinging ? (
-          <button 
-            onClick={handleSkipTurn} 
-            style={{...styles.addSongBtn, background: '#f9d423', color: '#1a1a2e'}}
-          >
-            차례 넘기기 ⏭️
-          </button>
-        ) : (
-          <button 
-            onClick={() => setShowSongPicker(true)} 
-            style={{
-              ...styles.addSongBtn,
-              background: isMyTurn ? '#e94560' : '#444',
-              cursor: isMyTurn ? 'pointer' : 'not-allowed'
-            }}
-            disabled={!isMyTurn}
-          >
-            {isMyTurn ? '🎶 노래 고르기' : '차례 대기'}
-          </button>
-        )}
+    // 노래 부르는 중일 때 (기존 유지)
+    <button 
+      onClick={handleSkipTurn} 
+      style={{...styles.addSongBtn, background: '#f9d423', color: '#1a1a2e'}}
+    >
+      차례 넘기기
+    </button>
+  ) : isMyTurn ? (
+    <div style={{ display: 'flex', gap: '0.5rem' }}>
+      <button 
+        onClick={() => setShowSongPicker(true)} 
+        style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
+      >
+        🎶 노래 고르기
+      </button>
+      <button 
+        onClick={handleSkipTurn} 
+        style={styles.smallPassBtn}
+      >
+        넘기기
+      </button>
+    </div>
+  ) : (
+    <button 
+      style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
+      disabled
+    >
+      차례 대기
+    </button>
+  )}
       </footer>
 
       {showSongPicker && (
@@ -674,7 +685,19 @@ const styles = {
   searchContainer: { display: 'flex', gap: '0.5rem', marginBottom: '1rem', width: '100%' },
   searchInput: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 'clamp(1rem, 4vw, 1.125rem)', boxSizing: 'border-box', outline: 'none', minWidth: 0 },
   searchSubmitBtn: { padding: '0 1.25rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
-  
+  smallPassBtn: {
+    flex: 1,
+    padding: '0.75rem 0.5rem',
+    borderRadius: '0.75rem',
+    background: '#30475e', // 가독성을 위해 차분한 남색 계열
+    color: '#fff',
+    fontSize: 'clamp(0.85rem, 3vw, 1rem)', // 메인 버튼보다 작게 설정
+    fontWeight: 'bold',
+    border: 'none',
+    cursor: 'pointer',
+    transition: '0.3s',
+    whiteSpace: 'nowrap'
+  },
   songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.5rem' },
   songItem: { padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.75rem', cursor: 'pointer', transition: 'background 0.2s ease' },
   
