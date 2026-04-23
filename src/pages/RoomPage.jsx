@@ -487,7 +487,12 @@ export default function RoomPage() {
     // 노래 부르는 중일 때 (기존 유지)
     <button 
       onClick={handleSkipTurn} 
-      style={{...styles.addSongBtn, background: '#f9d423', color: '#1a1a2e'}}
+      style={{
+        ...styles.addSongBtn, 
+        background: '#f9d423', 
+        color:'#1a1a2e',
+        cursor: 'pointer'
+      }}
     >
       차례 넘기기
     </button>
@@ -501,7 +506,14 @@ export default function RoomPage() {
       </button>
       <button 
         onClick={handleSkipTurn} 
-        style={styles.smallPassBtn}
+        disabled={participants.length <= 1}
+        style={{ 
+          ...styles.smallPassBtn,
+          background: participants.length <= 1 ? '#444' : '#f9d423',
+          color: participants.length <= 1 ? '#888' : '#fff',
+          cursor: participants.length <= 1 ? 'not-allowed' : 'pointer',
+          opacity: participants.length <= 1 ? 0.6 : 1
+        }}
       >
         넘기기
       </button>
