@@ -40,7 +40,8 @@ export default function RoomPage() {
 
   const playingVideoRef = useRef(playingVideo);
   const userRef = useRef(user);
-  const ytPlayerRef = useRef(null); 
+  const ytPlayerRef = useRef(null);
+  const syncIntervalRef = useRef(null);
 
   useEffect(() => {
     playingVideoRef.current = playingVideo;
@@ -137,6 +138,10 @@ export default function RoomPage() {
     };
 
     const onSongStop = () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
       if (!isLeaving.current) {
         setPlayingVideo(null);
         setIsVideoPlaying(false);
@@ -226,22 +231,38 @@ export default function RoomPage() {
     // 1. 재생 시작 또는 버퍼링 후 재개 시
     if (event.data === PLAYING) {
       if (amISingingNow) {
-        setIsVideoPlaying(true); 
+        setIsVideoPlaying(true);
         event.target.getCurrentTime().then(time => {
-          console.log(`[Sync] 가수 재생 재개 - 기준점 발송: ${time}s`);
           getSocket()?.emit('song:send_sync', { time });
         });
+        // 3초마다 싱크 기준점 발송
+        if (!syncIntervalRef.current) {
+          syncIntervalRef.current = setInterval(() => {
+            if (ytPlayerRef.current?.getCurrentTime) {
+              ytPlayerRef.current.getCurrentTime().then(t => {
+                getSocket()?.emit('song:send_sync', { time: t });
+              });
+            }
+          }, 3000);
+        }
       } else {
-        console.log("[Sync] 관객 재생 재개 - 싱크 요청");
         getSocket()?.emit('song:request_sync');
       }
-    } 
-    
+    }
+
     else if (event.data === BUFFERING) {
       setIsVideoPlaying(false);
+      if (amISingingNow && syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
     }
 
     else if (event.data === ENDED) {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
       if (amISingingNow) {
         getSocket()?.emit('song:end');
         setPlayingVideo(null);
