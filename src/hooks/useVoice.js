@@ -14,7 +14,11 @@ export function useVoice() {
   const start = useCallback(async (roomId) => {
     // 이미 연결된 상태면 무시 (레이스 컨디션 방지: 비동기 전에 즉시 설정)
     if (clientRef.current) return;
-    const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+    // 저지연 모드: 무음 구간 패킷 전송 억제로 지연 감소
+    AgoraRTC.setParameter('AUDIO_SESSION_ENABLE_OPUS_DTX', true);
+
+    const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'h264' });
     clientRef.current = client;
 
     // 모바일 autoplay 차단 시 사용자에게 탭 유도
@@ -59,11 +63,16 @@ export function useVoice() {
       await client.join(APP_ID, String(roomId), token, uid);
       console.log('[Agora] joined successfully');
 
-      // 4. 마이크 트랙 생성 및 발행 (✨ 노래방 최적화 옵션 적용)
+      // 4. 마이크 트랙 생성 및 발행
       const localTrack = await AgoraRTC.createMicrophoneAudioTrack({
-        encoderConfig: "high_quality", // 고음질 전송
+        encoderConfig: {
+          sampleRate: 48000, // 고음질 샘플레이트 유지
+          stereo: false,     // 모노: 스테레오 대비 절반 bitrate → 지연 감소
+          bitrate: 64,       // 64kbps: high_quality(128kbps) 대비 지연 절반
+        },
         AEC: true, // 에코 캔슬링 (하울링 방지)
         ANS: true, // 노이즈 캔슬링
+        AGC: true, // 자동 게인 컨트롤
       });
       
       localTrackRef.current = localTrack;
