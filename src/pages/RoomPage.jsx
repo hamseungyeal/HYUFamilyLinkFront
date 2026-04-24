@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import YouTube from 'react-youtube'; 
 
 const EMOJIS = ['🎤', '👏', '🔥', '❤️', '😂', '🎵'];
+const AGORA_OFFSET_SEC = 0.15; // Agora 음성 지연 보정값: 관객 YouTube를 목소리보다 이 만큼 뒤로 당겨서 싱크
 
 export default function RoomPage() {
   const navigate = useNavigate();
@@ -159,8 +160,10 @@ export default function RoomPage() {
       if (currentVideo && currentUser && String(currentUser.id).trim() !== String(currentVideo.singerId).trim()) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
           const myTime = await ytPlayerRef.current.getCurrentTime();
-          if (Math.abs(myTime - time) > 0.1) { 
-            ytPlayerRef.current.seekTo(time, true);
+          const targetTime = Math.max(0, time - AGORA_OFFSET_SEC);
+          if (Math.abs(myTime - targetTime) > 0.1) {
+            console.log(`[Sync] 드리프트 보정: ${myTime.toFixed(2)}s → ${targetTime.toFixed(2)}s`);
+            ytPlayerRef.current.seekTo(targetTime, true);
           }
         }
         setIsVideoPlaying(true);
@@ -190,9 +193,22 @@ export default function RoomPage() {
     ytPlayerRef.current = event.target;
     const currentVideo = playingVideoRef.current;
     const currentUser = userRef.current;
-    if (currentVideo && currentUser && String(currentUser.id).trim() !== String(currentVideo.singerId).trim()) {
-      getSocket()?.emit('song:request_sync');
+    if (!currentVideo || !currentUser) return;
+
+    const isSinger = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
+
+    if (isSinger) return; // 가수는 그냥 재생
+
+    // startAt 기반으로 현재 재생 위치 계산 (중간입장 포함)
+    if (currentVideo.startAt) {
+      const elapsed = (Date.now() - currentVideo.startAt) / 1000;
+      const seekTo = Math.max(0, elapsed - AGORA_OFFSET_SEC);
+      console.log(`[Sync] 중간입장 계산: elapsed=${elapsed.toFixed(2)}s → seek=${seekTo.toFixed(2)}s`);
+      event.target.seekTo(seekTo, true);
     }
+
+    // 드리프트 보정용 백업 싱크 요청
+    getSocket()?.emit('song:request_sync');
   };
 
   const onPlayerStateChange = (event) => {
